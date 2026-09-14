@@ -1,0 +1,39 @@
+[tool.poetry]
+name = "conversor-arquivos"
+version = "0.1.0"
+description = "API de conversao/processamento de arquivos com fila assincrona e webhook"
+authors = ["chris <thomas090513@gmail.com>"]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.13"
+fastapi = "^0.115.0"
+uvicorn = { extras = ["standard"], version = "^0.32.0" }
+python-multipart = "^0.0.12"
+pydantic = "^2.9.0"
+pydantic-settings = "^2.6.0"
+sqlalchemy = "^2.0.35"
+psycopg = { extras = ["binary"], version = "^3.2.3" }
+alembic = "^1.13.3"
+celery = { extras = ["redis"], version = "^5.4.0" }
+redis = "^5.1.0"
+minio = "^7.2.9"
+httpx = "^0.27.2"
+pillow = "^11.0.0"
+pandas = "^2.2.3"
+openpyxl = "^3.1.5"
+pypdf = "^5.0.1"
+pdfplumber = "^0.11.4"
+reportlab = "^4.2.5"
+ffmpeg-python = "^0.2.0"
+filetype = "^1.2.0"
+tenacity = "^9.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.3"
+pytest-asyncio = "^0.24.0"
+ruff = "^0.7.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
