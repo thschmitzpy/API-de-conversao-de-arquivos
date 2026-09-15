@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     minio_bucket_input: str = "inputs"
     minio_bucket_output: str = "outputs"
     minio_secure: bool = False
+    minio_region: str = "us-east-1"
 
     webhook_signing_secret: str
     webhook_max_retries: int = 5

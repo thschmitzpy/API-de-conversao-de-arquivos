@@ -17,13 +17,14 @@ from app.storage.minio_client import (
     upload_stream,
 )
 from app.webhook import notifier
-from app.workers.processors import image
+from app.workers.processors import csv_validate, image
 from app.workers.processors.base import Processor
 
 logger = get_task_logger(__name__)
 
 _PROCESSORS: dict[str, Processor] = {
     "image.thumbnail": image.thumbnail,
+    "csv.validate": csv_validate.validate,
 }
 
 
