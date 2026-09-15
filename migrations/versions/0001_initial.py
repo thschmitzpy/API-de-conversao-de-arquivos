@@ -1,10 +1,3 @@
-"""initial schema
-
-Revision ID: 0001_initial
-Revises:
-Create Date: 2026-09-14
-
-"""
 from typing import Sequence, Union
 
 import sqlalchemy as sa
