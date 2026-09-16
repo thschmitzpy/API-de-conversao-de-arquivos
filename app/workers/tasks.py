@@ -17,7 +17,12 @@ from app.storage.minio_client import (
     upload_stream,
 )
 from app.webhook import notifier
-from app.workers.processors import csv_validate, image
+from app.workers.processors import (
+    csv_validate,
+    excel_to_csv,
+    image,
+    pdf_extract_text,
+)
 from app.workers.processors.base import Processor
 
 logger = get_task_logger(__name__)
@@ -25,6 +30,8 @@ logger = get_task_logger(__name__)
 _PROCESSORS: dict[str, Processor] = {
     "image.thumbnail": image.thumbnail,
     "csv.validate": csv_validate.validate,
+    "excel.to-csv": excel_to_csv.to_csv,
+    "pdf.extract-text": pdf_extract_text.extract_text,
 }
 
 
