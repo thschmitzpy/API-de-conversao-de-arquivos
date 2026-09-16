@@ -22,6 +22,7 @@ from app.workers.processors import (
     excel_to_csv,
     image,
     pdf_extract_text,
+    video_transcode,
 )
 from app.workers.processors.base import Processor
 
@@ -32,6 +33,7 @@ _PROCESSORS: dict[str, Processor] = {
     "csv.validate": csv_validate.validate,
     "excel.to-csv": excel_to_csv.to_csv,
     "pdf.extract-text": pdf_extract_text.extract_text,
+    "video.transcode": video_transcode.transcode,
 }
 
 
