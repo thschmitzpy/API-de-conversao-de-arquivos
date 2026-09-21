@@ -18,11 +18,13 @@ from app.storage.minio_client import (
 )
 from app.webhook import notifier
 from app.workers.processors import (
+    audio_extract,
     csv_validate,
     excel_to_csv,
     image,
     pdf_extract_text,
-    video_transcode, audio_extract,
+    pdf_merge,
+    video_transcode,
 )
 from app.workers.processors.base import Processor
 
@@ -33,6 +35,7 @@ _PROCESSORS: dict[str, Processor] = {
     "csv.validate": csv_validate.validate,
     "excel.to-csv": excel_to_csv.to_csv,
     "pdf.extract-text": pdf_extract_text.extract_text,
+    "pdf.merge": pdf_merge.merge,
     "video.transcode": video_transcode.transcode,
     "audio.extract": audio_extract.extract,
 }
