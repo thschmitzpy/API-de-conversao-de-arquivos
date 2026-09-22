@@ -16,7 +16,7 @@ RUN pip install "poetry==${POETRY_VERSION}"
 
 COPY pyproject.toml poetry.lock* /code/
 
-RUN poetry install --no-interaction --no-ansi --no-root --without dev
+RUN poetry install --no-interaction --no-ansi --no-root
 
 COPY alembic.ini /code/alembic.ini
 COPY ./migrations /code/migrations

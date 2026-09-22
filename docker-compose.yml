@@ -21,6 +21,7 @@ services:
       - ./app:/code/app
       - ./migrations:/code/migrations
       - ./alembic.ini:/code/alembic.ini
+      - ./tests:/code/tests
     networks:
       - conversor-net
 
