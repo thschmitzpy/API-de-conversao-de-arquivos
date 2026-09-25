@@ -40,6 +40,7 @@ services:
         condition: service_started
     volumes:
       - ./app:/code/app
+      - ./tests:/code/tests
     networks:
       - conversor-net
 
