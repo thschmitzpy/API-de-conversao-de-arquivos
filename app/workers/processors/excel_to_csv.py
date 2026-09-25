@@ -4,6 +4,7 @@ import csv
 from datetime import date, datetime, time
 from io import BytesIO, StringIO
 from typing import Any
+from zipfile import BadZipfile
 
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
@@ -30,7 +31,7 @@ def to_csv(
 
     try:
         wb = load_workbook(input_stream, read_only=True, data_only=True)
-    except (InvalidFileException, KeyError, OSError, ValueError) as exc:
+    except (InvalidFileException, KeyError, OSError, ValueError, BadZipfile) as exc:
         raise ValueError(f"arquivo Excel invalido: {exc}") from exc
 
     try:
