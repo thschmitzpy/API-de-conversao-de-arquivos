@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import io
 import json
 import uuid
@@ -13,6 +11,7 @@ from fastapi import (
     Form,
     HTTPException,
     Request,
+    Response,
     UploadFile,
     status,
 )
@@ -21,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.broker.celery_app import celery_app
 from app.config import get_settings
 from app.database import get_db
+from app.rate_limit import limiter
 from app.models import Job, JobStatus
 from app.schemas import JobCreateResponse, JobStatusResponse
 from app.storage.minio_client import (
@@ -65,8 +65,10 @@ def _safe_filename(raw: str) -> str:
     status_code=status.HTTP_202_ACCEPTED,
     summary="Cria um novo job de processamento",
 )
+@limiter.limit(get_settings().rate_limit_create_job)
 def create_job(
     request: Request,
+    response: Response,
     file: Annotated[UploadFile, File(description="Arquivo a ser processado")],
     operation: Annotated[
         str,
@@ -162,7 +164,10 @@ def create_job(
     summary="Consulta o estado de um job",
     responses={404: {"description": "Job nao encontrado"}},
 )
+@limiter.limit(get_settings().rate_limit_get_job)
 def get_job(
+    request: Request,
+    response: Response,
     job_id: uuid.UUID,
     db: Session = Depends(get_db),
 ) -> JobStatusResponse:

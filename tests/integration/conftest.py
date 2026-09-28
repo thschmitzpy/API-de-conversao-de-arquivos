@@ -6,6 +6,7 @@ from collections.abc import Generator
 import pytest
 from fastapi.testclient import TestClient
 from minio.error import S3Error
+from app.rate_limit import limiter
 from PIL import Image
 from sqlalchemy import text
 
@@ -32,6 +33,14 @@ def _clean_state() -> Generator[None, None, None]:
 @pytest.fixture
 def client() -> TestClient:
     return TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+
+
+def _reset_rate_limit():
+    limiter.reset()
+    yield
 
 
 def _truncate_jobs() -> None:

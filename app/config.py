@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     webhook_max_retries: int = 5
     webhook_timeout_seconds: int = 10
 
+    rate_limit_enabled: bool = True
+    rate_limit_storage_url: str = "memory://"
+    rate_limit_create_job: str = "10/minute"
+    rate_limit_get_job: str = "60/minute"
+
 
 @lru_cache
 def get_settings() -> Settings:
