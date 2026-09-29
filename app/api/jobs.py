@@ -10,11 +10,13 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
     Request,
     Response,
     UploadFile,
     status,
 )
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.broker.celery_app import celery_app
@@ -22,7 +24,12 @@ from app.config import get_settings
 from app.database import get_db
 from app.rate_limit import limiter
 from app.models import Job, JobStatus
-from app.schemas import JobCreateResponse, JobStatusResponse
+from app.schemas import (
+    JobCreateResponse,
+    JobListResponse,
+    JobStatusResponse,
+    JobSummary,
+)
 from app.storage.minio_client import (
     delete_object,
     presigned_get_url,
@@ -154,6 +161,71 @@ def create_job(
         id=job.id,
         status=job.status,
         status_url=str(request.url_for("get_job", job_id=job.id)),
+    )
+
+
+_ALLOWED_ORDERS = {"created_at:desc", "created_at:asc"}
+
+
+@router.get(
+    "",
+    response_model=JobListResponse,
+    name="list_jobs",
+    summary="Lista jobs com paginacao e filtros",
+)
+@limiter.limit(get_settings().rate_limit_get_job)
+def list_jobs(
+    request: Request,
+    response: Response,
+    status_: Annotated[
+        list[JobStatus] | None,
+        Query(alias="status", description="Filtra por um ou mais status"),
+    ] = None,
+    operation: Annotated[
+        str | None,
+        Query(description="Filtra por operation exata"),
+    ] = None,
+    limit: Annotated[
+        int, Query(ge=1, le=100, description="Itens por pagina (1-100)")
+    ] = 20,
+    offset: Annotated[
+        int, Query(ge=0, description="Offset a partir do inicio")
+    ] = 0,
+    order: Annotated[
+        str,
+        Query(description="Ordenacao: created_at:desc (default) ou created_at:asc"),
+    ] = "created_at:desc",
+    db: Session = Depends(get_db),
+) -> JobListResponse:
+    if order not in _ALLOWED_ORDERS:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"order invalido. Aceitos: {sorted(_ALLOWED_ORDERS)}",
+        )
+
+    stmt = select(Job)
+    count_stmt = select(func.count()).select_from(Job)
+
+    if status_:
+        stmt = stmt.where(Job.status.in_(status_))
+        count_stmt = count_stmt.where(Job.status.in_(status_))
+    if operation:
+        stmt = stmt.where(Job.operation == operation)
+        count_stmt = count_stmt.where(Job.operation == operation)
+
+    if order == "created_at:desc":
+        stmt = stmt.order_by(Job.created_at.desc())
+    else:
+        stmt = stmt.order_by(Job.created_at.asc())
+
+    total = db.execute(count_stmt).scalar_one()
+    rows = db.execute(stmt.limit(limit).offset(offset)).scalars().all()
+
+    return JobListResponse(
+        items=[JobSummary.model_validate(row) for row in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
     )
 
 

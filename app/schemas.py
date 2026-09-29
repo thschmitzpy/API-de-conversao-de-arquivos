@@ -41,6 +41,30 @@ class JobStatusResponse(BaseModel):
     finished_at: datetime | None = None
 
 
+class JobSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    status: JobStatus
+    operation: str
+
+    input_filename: str
+    input_size_bytes: int
+
+    error_message: str | None = None
+
+    created_at: datetime
+    updated_at: datetime
+    finished_at: datetime | None = None
+
+
+class JobListResponse(BaseModel):
+    items: list[JobSummary]
+    total: int
+    limit: int
+    offset: int
+
+
 class WebhookPayload(BaseModel):
     event: Literal["job.completed", "job.failed"]
     job_id: uuid.UUID
