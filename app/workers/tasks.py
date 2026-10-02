@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.broker.celery_app import celery_app
 from app.config import Settings, get_settings
 from app.database import SessionLocal
+from app.metrics import JOB_PROCESSING_SECONDS, JOBS_FINISHED
 from app.models import Job, JobStatus
 from app.schemas import WebhookPayload
 from app.storage.minio_client import (
@@ -52,18 +54,21 @@ def process_job(job_id: str) -> None:
             logger.error("Job %s nao encontrado no banco", job_id)
             return
 
-        processor = _PROCESSORS.get(job.operation)
+        operation = job.operation
+        processor = _PROCESSORS.get(operation)
         if processor is None:
             job.status = JobStatus.FAILED
-            job.error_message = f"Operacao '{job.operation}' nao suportada"
+            job.error_message = f"Operacao '{operation}' nao suportada"
             job.finished_at = datetime.now(timezone.utc)
             db.commit()
-            logger.error("Job %s: operacao %s nao suportada", job_id, job.operation)
+            logger.error("Job %s: operacao %s nao suportada", job_id, operation)
+            JOBS_FINISHED.labels(operation=operation, status="unsupported").inc()
         else:
             job.status = JobStatus.PROCESSING
             job.started_at = datetime.now(timezone.utc)
             db.commit()
 
+            started = time.monotonic()
             try:
                 input_stream = download_bytes(
                     settings.minio_bucket_input,
@@ -87,7 +92,8 @@ def process_job(job_id: str) -> None:
                 job.status = JobStatus.DONE
                 job.finished_at = datetime.now(timezone.utc)
                 db.commit()
-                logger.info("Job %s concluido (%s)", job_id, job.operation)
+                logger.info("Job %s concluido (%s)", job_id, operation)
+                JOBS_FINISHED.labels(operation=operation, status="done").inc()
 
             except Exception as exc:
                 db.rollback()
@@ -98,6 +104,11 @@ def process_job(job_id: str) -> None:
                     job.finished_at = datetime.now(timezone.utc)
                     db.commit()
                 logger.exception("Job %s falhou", job_id)
+                JOBS_FINISHED.labels(operation=operation, status="failed").inc()
+            finally:
+                JOB_PROCESSING_SECONDS.labels(operation=operation).observe(
+                    time.monotonic() - started
+                )
 
         job = db.get(Job, job_uuid)
         if job is not None and job.callback_url:

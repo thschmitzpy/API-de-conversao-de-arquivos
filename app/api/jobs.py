@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from app.broker.celery_app import celery_app
 from app.config import get_settings
 from app.database import get_db
+from app.metrics import JOBS_CREATED
 from app.rate_limit import limiter
 from app.models import Job, JobStatus
 from app.schemas import (
@@ -156,6 +157,7 @@ def create_job(
         ) from exc
 
     celery_app.send_task("app.workers.tasks.process_job", args=[str(job.id)])
+    JOBS_CREATED.labels(operation=operation).inc()
 
     return JobCreateResponse(
         id=job.id,

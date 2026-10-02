@@ -1,4 +1,6 @@
 from celery import Celery
+from celery.signals import worker_ready
+from prometheus_client import start_http_server
 
 from app.config import get_settings
 
@@ -22,3 +24,8 @@ celery_app.conf.update(
     task_soft_time_limit=540,
     worker_prefetch_multiplier=1,
 )
+
+
+@worker_ready.connect
+def _start_metrics_server(**_: object) -> None:
+    start_http_server(settings.metrics_port)

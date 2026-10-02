@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     rate_limit_create_job: str = "10/minute"
     rate_limit_get_job: str = "60/minute"
 
+    metrics_port: int = 9100
+
 
 @lru_cache
 def get_settings() -> Settings:
