@@ -31,6 +31,8 @@ services:
       dockerfile: Dockerfile.worker
     container_name: conversor-worker
     env_file: .env
+    ports:
+      - "9100:9100"
     depends_on:
       postgres:
         condition: service_healthy
@@ -86,9 +88,49 @@ services:
     networks:
       - conversor-net
 
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: conversor-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - conversor-prometheus:/prometheus
+    depends_on:
+      - api
+      - worker
+    networks:
+      - conversor-net
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: conversor-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_USERS_DEFAULT_THEME: light
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - conversor-grafana:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - conversor-net
+
 volumes:
   conversor-pg:
   conversor-minio:
+  conversor-prometheus:
+  conversor-grafana:
 
 networks:
   conversor-net:
