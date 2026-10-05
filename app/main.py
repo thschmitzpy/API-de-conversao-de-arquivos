@@ -9,8 +9,11 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 
 from app.api.health import router as health_router
 from app.api.jobs import router as jobs_router
+from app.logging_setup import configure_logging
 from app.rate_limit import limiter
 from app.storage.minio_client import ensure_buckets
+
+configure_logging()
 
 
 @retry(stop=stop_after_attempt(30), wait=wait_fixed(2), reraise=True)

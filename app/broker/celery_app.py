@@ -1,8 +1,9 @@
 from celery import Celery
-from celery.signals import worker_ready
+from celery.signals import setup_logging, worker_ready
 from prometheus_client import start_http_server
 
 from app.config import get_settings
+from app.logging_setup import configure_logging
 
 settings = get_settings()
 
@@ -24,6 +25,11 @@ celery_app.conf.update(
     task_soft_time_limit=540,
     worker_prefetch_multiplier=1,
 )
+
+
+@setup_logging.connect
+def _configure_logging(**_: object) -> None:
+    configure_logging()
 
 
 @worker_ready.connect

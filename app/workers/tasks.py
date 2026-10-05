@@ -51,7 +51,7 @@ def process_job(job_id: str) -> None:
     with SessionLocal() as db:
         job = db.get(Job, job_uuid)
         if job is None:
-            logger.error("Job %s nao encontrado no banco", job_id)
+            logger.error("Job nao encontrado no banco", extra={"job_id": job_id})
             return
 
         operation = job.operation
@@ -61,7 +61,10 @@ def process_job(job_id: str) -> None:
             job.error_message = f"Operacao '{operation}' nao suportada"
             job.finished_at = datetime.now(timezone.utc)
             db.commit()
-            logger.error("Job %s: operacao %s nao suportada", job_id, operation)
+            logger.error(
+                "Operacao nao suportada",
+                extra={"job_id": job_id, "operation": operation},
+            )
             JOBS_FINISHED.labels(operation=operation, status="unsupported").inc()
         else:
             job.status = JobStatus.PROCESSING
@@ -92,7 +95,10 @@ def process_job(job_id: str) -> None:
                 job.status = JobStatus.DONE
                 job.finished_at = datetime.now(timezone.utc)
                 db.commit()
-                logger.info("Job %s concluido (%s)", job_id, operation)
+                logger.info(
+                    "Job concluido",
+                    extra={"job_id": job_id, "operation": operation},
+                )
                 JOBS_FINISHED.labels(operation=operation, status="done").inc()
 
             except Exception as exc:
@@ -103,7 +109,10 @@ def process_job(job_id: str) -> None:
                     job.error_message = f"{type(exc).__name__}: {exc}"
                     job.finished_at = datetime.now(timezone.utc)
                     db.commit()
-                logger.exception("Job %s falhou", job_id)
+                logger.exception(
+                    "Job falhou",
+                    extra={"job_id": job_id, "operation": operation},
+                )
                 JOBS_FINISHED.labels(operation=operation, status="failed").inc()
             finally:
                 JOB_PROCESSING_SECONDS.labels(operation=operation).observe(
@@ -144,14 +153,15 @@ def _deliver_webhook(db: Session, job: Job, settings: Settings) -> None:
 
     if delivery.delivered:
         logger.info(
-            "Webhook do job %s entregue em %d tentativa(s)",
-            job.id,
-            delivery.attempts,
+            "Webhook entregue",
+            extra={"job_id": str(job.id), "attempts": delivery.attempts},
         )
     else:
         logger.warning(
-            "Webhook do job %s falhou apos %d tentativa(s): %s",
-            job.id,
-            delivery.attempts,
-            delivery.error,
+            "Webhook falhou",
+            extra={
+                "job_id": str(job.id),
+                "attempts": delivery.attempts,
+                "error": str(delivery.error),
+            },
         )
