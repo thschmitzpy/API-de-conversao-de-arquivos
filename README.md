@@ -16,6 +16,7 @@ Projeto de portfólio — foco em arquitetura clara, testes e empacotamento Dock
 | Banco | Postgres 16 + SQLAlchemy 2.0 (síncrono) + Alembic |
 | Processamento | Pillow, pandas, openpyxl, pypdf, FFmpeg |
 | Rate limiting | slowapi |
+| Observabilidade | Prometheus + Grafana + logs estruturados JSON |
 | Testes | pytest (160+ casos, incluindo integração end-to-end) |
 | Deploy | Docker Compose |
 
@@ -83,13 +84,16 @@ cp .env.example .env         # ajuste segredos se quiser
 docker compose up -d --build
 ```
 
-Isso sobe 5 containers: `api`, `worker`, `postgres`, `redis`, `minio`. A API aplica as migrations Alembic no startup.
+Isso sobe 7 containers: `api`, `worker`, `postgres`, `redis`, `minio`, `prometheus` e `grafana`. A API aplica as migrations Alembic no startup.
 
 Endpoints disponíveis:
 
 - **API** — http://localhost:8000
 - **Swagger UI** — http://localhost:8000/docs
-- **Health check** — http://localhost:8000/health
+- **Health / Readiness** — http://localhost:8000/health e http://localhost:8000/ready
+- **Métricas Prometheus** — http://localhost:8000/metrics (API) e http://localhost:9100 (worker)
+- **Grafana** — http://localhost:3000 (login `admin/admin`, dashboard "ConversorArquivos" pré-provisionado)
+- **Prometheus** — http://localhost:9090
 - **Console MinIO** — http://localhost:9001 (usuário/senha: `minioadmin` / `minioadmin`)
 - **Postgres** — `localhost:5434` (usuário/senha/db: `conversor`)
 
@@ -175,6 +179,56 @@ Por padrão (configurável no `.env`):
 - `GET /jobs/{id}` e `GET /jobs` — **60 requisições/minuto por IP**
 
 Quando excedido, a API responde `429 Too Many Requests`.
+
+---
+
+## Observabilidade
+
+A API e o worker expõem três camadas de observabilidade — todas prontas no `docker compose up`, sem configuração adicional.
+
+### Health checks
+
+- `GET /health` — liveness: responde `200 OK` enquanto o processo está de pé.
+- `GET /ready` — readiness: verifica Postgres (`SELECT 1`), Redis (`PING`) e MinIO (`list_buckets`). Devolve `200` com `{"status":"ready"}` quando tudo responde, ou `503 Service Unavailable` detalhando qual dependência caiu.
+
+Nenhuma das rotas passa pelo rate limiter — seguras para probes de orquestrador.
+
+### Métricas Prometheus
+
+A API expõe `/metrics` via `prometheus-fastapi-instrumentator`. O worker Celery expõe suas próprias métricas em um HTTP server na porta **9100**, iniciado no signal `worker_ready`.
+
+Métricas de negócio (em `app/metrics.py`, compartilhadas entre API e worker):
+
+| Métrica | Labels | Descrição |
+|---|---|---|
+| `jobs_created_total` | `operation` | Jobs criados por tipo de operação |
+| `jobs_finished_total` | `operation`, `status` | Jobs finalizados (`done` / `failed` / `unsupported`) |
+| `job_processing_seconds` | `operation` | Histograma do tempo de processamento (0.1s → 300s) |
+
+Além dessas, o instrumentator exporta `http_requests_total` e `http_request_duration_seconds_bucket` — excluindo `/metrics`, `/health` e `/ready` do próprio tráfego medido.
+
+### Dashboard Grafana
+
+O compose provisiona o Grafana com datasource Prometheus e um dashboard pré-carregado — abra http://localhost:3000 e procure por **ConversorArquivos**. Quatro painéis:
+
+1. **RPS por endpoint (API)** — taxa por `handler`.
+2. **Latência p95 por endpoint (API)** — `histogram_quantile(0.95, ...)` sobre o bucket de duração.
+3. **Jobs criados por operation** — stacked.
+4. **Jobs finalizados por status** — stacked, cores fixas (verde `done`, vermelho `failed`, laranja `unsupported`).
+
+Prometheus (http://localhost:9090) retém 7 dias no volume `conversor-prometheus`.
+
+### Logs estruturados JSON
+
+Toda saída de log — API, worker, Uvicorn e Celery — é renderizada em JSON single-line, pronta para Loki, Elastic ou Datadog. Cada linha carrega `timestamp` (ISO 8601 com timezone), `level`, `logger`, `message` e campos estruturados injetados via `extra={...}`.
+
+Os call sites de processamento injetam `job_id` e `operation` como campos top-level — você filtra `job_id="abc-123"` direto no backend de logs em vez de regex em texto livre:
+
+```json
+{"timestamp":"2026-10-05T18:00:02.431Z","level":"INFO","logger":"app.workers.tasks","message":"Job concluido","job_id":"abc-123","operation":"image.thumbnail"}
+```
+
+Configuração em `app/logging_setup.py` (`ConversorJsonFormatter` + `configure_logging()`). A API chama o setup antes de instanciar o FastAPI; o worker, via signal `setup_logging` do Celery.
 
 ---
 
