@@ -4,6 +4,8 @@ API Python/FastAPI de **conversão e processamento assíncrono de arquivos** (im
 
 Projeto de portfólio — foco em arquitetura clara, testes e empacotamento Docker completo.
 
+![CI](https://github.com/thschmitzpy/API-de-conversao-de-arquivos/actions/workflows/ci.yml/badge.svg)
+
 ---
 
 ## Stack
@@ -255,6 +257,17 @@ docker compose run --rm --no-deps --entrypoint="" worker pytest \
 > No PowerShell, use `--entrypoint=""` com o sinal de igual — sem ele o PS descarta a string vazia.
 
 Cobertura atual: **160+ testes** em 10 suites — processors (unit), webhook (com e sem retry), rate limit e integração end-to-end (POST → worker → GET → MinIO).
+
+---
+
+## Integração contínua
+
+O workflow `.github/workflows/ci.yml` roda a cada push e pull request na branch `main`, com dois jobs:
+
+- **`lint`** — Ruff check sobre todo o código.
+- **`test`** — sobe Postgres, Redis e MinIO via `docker compose`, instala Python 3.13 + Poetry + FFmpeg no runner, aplica migrations Alembic, inicia o worker Celery em background e executa toda a suite `pytest`.
+
+Em caso de falha, o step final despeja o `celery.log` para facilitar o diagnóstico.
 
 ---
 

@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install Poetry
+        run: pipx install poetry==1.8.3
+      - name: Install dependencies
+        run: poetry install --with dev --no-interaction --no-root
+      - name: Ruff check
+        run: poetry run ruff check .
+
+  test:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql+psycopg://conversor:conversor@localhost:5434/conversor
+      CELERY_BROKER_URL: redis://localhost:6379/0
+      CELERY_RESULT_BACKEND: redis://localhost:6379/1
+      MINIO_ENDPOINT: localhost:9000
+      MINIO_PUBLIC_ENDPOINT: localhost:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET_INPUT: inputs
+      MINIO_BUCKET_OUTPUT: outputs
+      MINIO_SECURE: 'false'
+      WEBHOOK_SIGNING_SECRET: ci-test-secret
+      POSTGRES_USER: conversor
+      POSTGRES_PASSWORD: conversor
+      POSTGRES_DB: conversor
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare .env
+        run: cp .env.example .env
+
+      - name: Start services (Postgres, Redis, MinIO)
+        run: docker compose up -d postgres redis minio
+
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Poetry
+        run: pipx install poetry==1.8.3
+
+      - name: Install dependencies
+        run: poetry install --with dev --no-interaction --no-root
+
+      - name: Wait for services
+        run: |
+          for i in {1..30}; do pg_isready -h localhost -p 5434 -U conversor && break; sleep 2; done
+          for i in {1..30}; do curl -sf http://localhost:9000/minio/health/live && break; sleep 2; done
+
+      - name: Run migrations
+        run: poetry run alembic upgrade head
+
+      - name: Start Celery worker (background)
+        run: |
+          nohup poetry run celery -A app.broker.celery_app worker --loglevel=INFO > celery.log 2>&1 &
+          sleep 5
+
+      - name: Run tests
+        run: poetry run pytest tests/ -v
+
+      - name: Dump celery log on failure
+        if: failure()
+        run: cat celery.log || true
+
+      - name: Stop services
+        if: always()
+        run: docker compose down -v
