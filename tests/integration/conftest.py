@@ -15,6 +15,7 @@ from app.database import SessionLocal
 from app.main import app
 from app.storage.minio_client import ensure_buckets, get_client
 
+API_KEY = "dev-key-local"
 
 @pytest.fixture(scope="session", autouse=True)
 def _ensure_buckets_up() -> None:
@@ -32,7 +33,7 @@ def _clean_state() -> Generator[None, None, None]:
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, headers={"X-API-Key": API_KEY})
 
 
 @pytest.fixture(autouse=True)

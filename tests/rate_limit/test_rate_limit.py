@@ -13,7 +13,7 @@ from app.rate_limit import limiter
 @pytest.fixture
 def client() -> TestClient:
     limiter.reset()
-    return TestClient(app)
+    return TestClient(app, headers={"X-API-Key": "dev-key-local"})
 
 
 def _upload_kwargs() -> dict:

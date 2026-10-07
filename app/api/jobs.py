@@ -19,6 +19,7 @@ from fastapi import (
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.auth import require_api_key
 from app.broker.celery_app import celery_app
 from app.config import get_settings
 from app.database import get_db
@@ -37,7 +38,11 @@ from app.storage.minio_client import (
     upload_stream,
 )
 
-router = APIRouter(prefix="/jobs", tags=["jobs"])
+router = APIRouter(
+    prefix="/jobs",
+    tags=["jobs"],
+    dependencies=[Depends(require_api_key)],
+)
 
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 

@@ -31,6 +31,12 @@ class Settings(BaseSettings):
 
     metrics_port: int = 9100
 
+    api_keys: str = ""
+
+    @property
+    def allowed_api_keys(self) -> set[str]:
+        return {k.strip() for k in self.api_keys.split(",") if k.strip()}
+
 
 @lru_cache
 def get_settings() -> Settings:
