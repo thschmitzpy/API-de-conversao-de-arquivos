@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import io
 import json
 import time
 import uuid
 
-import pytest
 from PIL import Image
 
 from app.config import get_settings

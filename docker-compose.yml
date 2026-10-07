@@ -74,7 +74,7 @@ services:
       - conversor-net
 
   minio:
-    image: quay.io/minio/minio:latest
+    image: chainguard/minio:latest
     container_name: conversor-minio
     command: server /data --console-address ":9001"
     environment:
