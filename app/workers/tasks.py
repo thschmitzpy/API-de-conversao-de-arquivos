@@ -26,6 +26,7 @@ from app.workers.processors import (
     image,
     pdf_extract_text,
     pdf_merge,
+    pdf_watermark,
     video_transcode,
 )
 from app.workers.processors.base import Processor
@@ -38,6 +39,7 @@ _PROCESSORS: dict[str, Processor] = {
     "excel.to-csv": excel_to_csv.to_csv,
     "pdf.extract-text": pdf_extract_text.extract_text,
     "pdf.merge": pdf_merge.merge,
+    "pdf.watermark": pdf_watermark.watermark,
     "video.transcode": video_transcode.transcode,
     "audio.extract": audio_extract.extract,
 }

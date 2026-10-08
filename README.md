@@ -70,6 +70,7 @@ Fluxo:
 | `excel.to-csv` | XLSX | CSV | `sheet` (nome ou índice), `delimiter`, `encoding`, `include_header` |
 | `pdf.extract-text` | PDF | TXT ou JSON | `pages` (ex: `"1-3,5"`), `output_format` (`text` ou `json`) |
 | `pdf.merge` | ZIP de PDFs | PDF único | `order` (lista de nomes; se ausente, ordem alfabética) |
+| `pdf.watermark` | PDF | PDF com marca d'água | `text`, `position` (`diagonal`/`center`/`footer`/`header`), `opacity` (0–1), `font_size`, `color` (`gray`/`black`/`red`/`blue`) |
 | `video.transcode` | qualquer vídeo | MP4 ou WebM | `format`, `resolution` (`480p`/`720p`/`1080p`), `crf` (18-28), `strip_audio` |
 | `audio.extract` | áudio ou vídeo | MP3 / WAV / OGG / AAC | `format`, `bitrate`, `sample_rate`, `channels` |
 
