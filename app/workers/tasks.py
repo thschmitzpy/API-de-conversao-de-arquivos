@@ -24,6 +24,7 @@ from app.workers.processors import (
     csv_validate,
     excel_to_csv,
     image,
+    ocr_extract,
     pdf_extract_text,
     pdf_merge,
     pdf_watermark,
@@ -42,6 +43,7 @@ _PROCESSORS: dict[str, Processor] = {
     "pdf.watermark": pdf_watermark.watermark,
     "video.transcode": video_transcode.transcode,
     "audio.extract": audio_extract.extract,
+    "ocr.extract": ocr_extract.extract,
 }
 
 
