@@ -16,10 +16,10 @@ Projeto de portfólio — foco em arquitetura clara, testes e empacotamento Dock
 | Fila | Celery 5 + Redis 7 |
 | Storage | MinIO (S3-compatível) |
 | Banco | Postgres 16 + SQLAlchemy 2.0 (síncrono) + Alembic |
-| Processamento | Pillow, pandas, openpyxl, pypdf, FFmpeg |
+| Processamento | Pillow, pandas, openpyxl, pypdf, FFmpeg, Tesseract, LibreOffice headless |
 | Rate limiting | slowapi |
 | Observabilidade | Prometheus + Grafana + logs estruturados JSON |
-| Testes | pytest (160+ casos, incluindo integração end-to-end) |
+| Testes | pytest (250+ casos, incluindo integração end-to-end) |
 | Deploy | Docker Compose |
 
 Python 3.13 · Poetry 1.8
@@ -74,6 +74,7 @@ Fluxo:
 | `video.transcode` | qualquer vídeo | MP4 ou WebM | `format`, `resolution` (`480p`/`720p`/`1080p`), `crf` (18-28), `strip_audio` |
 | `audio.extract` | áudio ou vídeo | MP3 / WAV / OGG / AAC | `format`, `bitrate`, `sample_rate`, `channels` |
 | `ocr.extract` | PDF ou imagem (PNG/JPEG/WEBP/GIF) | TXT ou JSON | `lang` (`eng`, `por`, `por+eng`, …), `output_format` (`text` ou `json`), `dpi` (72-600, só para PDF) |
+| `document.convert` | DOCX / DOC / ODT / RTF / XLSX / XLS / ODS / PPTX / PPT / ODP | PDF | — (formato detectado pelo conteúdo, não pela extensão) |
 
 Limite de upload: **100 MB** por job.
 
@@ -248,17 +249,19 @@ docker compose run --rm --no-deps --entrypoint="" api pytest tests/ -v \
   --ignore=tests/processors/test_audio_extract.py
 ```
 
-Processors FFmpeg — vídeo e áudio (container `worker`):
+Processors que dependem de binários de sistema — FFmpeg, Tesseract e LibreOffice (container `worker`):
 
 ```bash
 docker compose run --rm --no-deps --entrypoint="" worker pytest \
   tests/processors/test_video_transcode.py \
-  tests/processors/test_audio_extract.py -v
+  tests/processors/test_audio_extract.py \
+  tests/processors/test_ocr_extract.py \
+  tests/processors/test_document_convert.py -v
 ```
 
 > No PowerShell, use `--entrypoint=""` com o sinal de igual — sem ele o PS descarta a string vazia.
 
-Cobertura atual: **160+ testes** em 10 suites — processors (unit), webhook (com e sem retry), rate limit e integração end-to-end (POST → worker → GET → MinIO).
+Cobertura atual: **250+ testes** em 18 suites — processors (unit), webhook (com e sem retry), rate limit e integração end-to-end (POST → worker → GET → MinIO).
 
 ---
 
@@ -282,7 +285,7 @@ app/
 ├── storage/          Cliente MinIO (upload, presigned, ensure_buckets)
 ├── webhook/          Notifier HMAC + retry
 ├── workers/          Celery tasks + processors
-│   └── processors/   image, csv, excel, pdf (extract/merge), video, audio
+│   └── processors/   image, csv, excel, pdf (extract/merge/watermark), video, audio, ocr, document
 ├── config.py         Settings via pydantic-settings
 ├── database.py       SessionLocal / get_db
 ├── main.py           FastAPI app + lifespan (ensure_buckets com retry)
@@ -308,6 +311,8 @@ tests/
 - **Webhook com HMAC-SHA256** — o cliente consegue validar criptograficamente que o payload veio deste serviço.
 - **Dois endpoints MinIO** (`MINIO_ENDPOINT` interno para API/worker; `MINIO_PUBLIC_ENDPOINT` para o host da URL presigned) — resolve o problema clássico de assinatura S3 em ambiente Docker, onde o nome do serviço interno não resolve do browser.
 - **SQLAlchemy síncrono** — o Celery worker é síncrono e manter o mesmo paradigma na API elimina complexidade de bridges async/sync.
+- **Detecção de formato por conteúdo** em `ocr.extract` e `document.convert` — magic bytes e estrutura interna (streams OLE2, diretórios OOXML, `mimetype` ODF) em vez de confiar na extensão ou no `content_type` do upload.
+- **LibreOffice com perfil isolado por job** (`-env:UserInstallation` em diretório temporário) — com `--concurrency=2`, duas instâncias no perfil padrão se bloqueiam e a segunda sai sem converter. O `soffice` roda em sessão própria para que o timeout mate o grupo inteiro de processos, sem deixar `soffice.bin` órfão.
 - **Enum Postgres explícito** para `job_status` — criado na migration, mais confiável do que depender da criação automática pelo SQLAlchemy.
 
 ---

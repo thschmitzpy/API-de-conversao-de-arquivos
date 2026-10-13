@@ -22,6 +22,7 @@ from app.webhook import notifier
 from app.workers.processors import (
     audio_extract,
     csv_validate,
+    document_convert,
     excel_to_csv,
     image,
     ocr_extract,
@@ -44,6 +45,7 @@ _PROCESSORS: dict[str, Processor] = {
     "video.transcode": video_transcode.transcode,
     "audio.extract": audio_extract.extract,
     "ocr.extract": ocr_extract.extract,
+    "document.convert": document_convert.convert,
 }
 
 
