@@ -12,6 +12,7 @@ from app.config import Settings, get_settings
 from app.database import SessionLocal
 from app.metrics import JOB_PROCESSING_SECONDS, JOBS_FINISHED
 from app.models import Job, JobStatus
+from app.operations import Operation
 from app.schemas import WebhookPayload
 from app.storage.minio_client import (
     download_bytes,
@@ -36,16 +37,16 @@ from app.workers.processors.base import Processor
 logger = get_task_logger(__name__)
 
 _PROCESSORS: dict[str, Processor] = {
-    "image.thumbnail": image.thumbnail,
-    "csv.validate": csv_validate.validate,
-    "excel.to-csv": excel_to_csv.to_csv,
-    "pdf.extract-text": pdf_extract_text.extract_text,
-    "pdf.merge": pdf_merge.merge,
-    "pdf.watermark": pdf_watermark.watermark,
-    "video.transcode": video_transcode.transcode,
-    "audio.extract": audio_extract.extract,
-    "ocr.extract": ocr_extract.extract,
-    "document.convert": document_convert.convert,
+    Operation.IMAGE_THUMBNAIL: image.thumbnail,
+    Operation.CSV_VALIDATE: csv_validate.validate,
+    Operation.EXCEL_TO_CSV: excel_to_csv.to_csv,
+    Operation.PDF_EXTRACT_TEXT: pdf_extract_text.extract_text,
+    Operation.PDF_MERGE: pdf_merge.merge,
+    Operation.PDF_WATERMARK: pdf_watermark.watermark,
+    Operation.VIDEO_TRANSCODE: video_transcode.transcode,
+    Operation.AUDIO_EXTRACT: audio_extract.extract,
+    Operation.OCR_EXTRACT: ocr_extract.extract,
+    Operation.DOCUMENT_CONVERT: document_convert.convert,
 }
 
 

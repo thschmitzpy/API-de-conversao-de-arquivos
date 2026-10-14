@@ -78,6 +78,8 @@ Fluxo:
 
 Limite de upload: **100 MB** por job.
 
+Uma `operation` fora da lista é rejeitada com `422 Unprocessable Entity` antes de qualquer upload ou gravação no banco; a resposta lista as operações aceitas. A lista vem do enum `Operation` (`app/operations.py`), compartilhado entre API e worker — um teste unitário garante que todo valor do enum tem processor registrado e vice-versa. No Swagger (`/docs`), o campo `operation` aparece como dropdown.
+
 ---
 
 ## Como rodar
@@ -261,7 +263,7 @@ docker compose run --rm --no-deps --entrypoint="" worker pytest \
 
 > No PowerShell, use `--entrypoint=""` com o sinal de igual — sem ele o PS descarta a string vazia.
 
-Cobertura atual: **250+ testes** em 18 suites — processors (unit), webhook (com e sem retry), rate limit e integração end-to-end (POST → worker → GET → MinIO).
+Cobertura atual: **250+ testes** em 19 suites — processors (unit), webhook (com e sem retry), rate limit e integração end-to-end (POST → worker → GET → MinIO).
 
 ---
 
@@ -280,22 +282,27 @@ Em caso de falha, o step final despeja o `celery.log` para facilitar o diagnóst
 
 ```
 app/
-├── api/              Endpoints HTTP (jobs.py)
+├── api/              Endpoints HTTP (jobs.py, health.py)
 ├── broker/           Fábrica da app Celery
 ├── storage/          Cliente MinIO (upload, presigned, ensure_buckets)
 ├── webhook/          Notifier HMAC + retry
 ├── workers/          Celery tasks + processors
 │   └── processors/   image, csv, excel, pdf (extract/merge/watermark), video, audio, ocr, document
+├── auth.py           Validação do header X-API-Key
 ├── config.py         Settings via pydantic-settings
 ├── database.py       SessionLocal / get_db
+├── logging_setup.py  Formatter JSON + configure_logging()
 ├── main.py           FastAPI app + lifespan (ensure_buckets com retry)
+├── metrics.py        Métricas Prometheus de negócio (API + worker)
 ├── models.py         ORM (Job, JobStatus)
+├── operations.py     Enum Operation (fonte única das operações aceitas)
 ├── rate_limit.py     Limiter slowapi
 └── schemas.py        Pydantic DTOs
 migrations/           Alembic
 tests/
 ├── processors/       Testes unitários dos processors
 ├── integration/      End-to-end contra Postgres/Redis/MinIO reais do compose
+├── unit/             Logging JSON + consistência enum Operation × processors
 ├── webhook/          Notifier + retry
 └── rate_limit/       Comportamento do slowapi
 ```

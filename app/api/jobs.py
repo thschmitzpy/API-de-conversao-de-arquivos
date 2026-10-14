@@ -24,6 +24,7 @@ from app.broker.celery_app import celery_app
 from app.config import get_settings
 from app.database import get_db
 from app.metrics import JOBS_CREATED
+from app.operations import Operation
 from app.rate_limit import limiter
 from app.models import Job, JobStatus
 from app.schemas import (
@@ -83,10 +84,10 @@ def create_job(
     request: Request,
     response: Response,
     file: Annotated[UploadFile, File(description="Arquivo a ser processado")],
-    operation: Annotated[
-        str,
-        Form(description="Operacao (ex: image.thumbnail, csv.validate, pdf.extract-text)"),
-    ],
+        operation: Annotated[
+            Operation,
+            Form(description="Operacao a executar sobre o arquivo"),
+        ],
     parameters: Annotated[
         str | None,
         Form(description="JSON com parametros especificos da operacao"),
@@ -137,7 +138,7 @@ def create_job(
     job = Job(
         id=job_id,
         status=JobStatus.PENDING,
-        operation=operation,
+        operation=operation.value,
         input_key=input_key,
         input_filename=filename,
         input_content_type=content_type,
@@ -162,7 +163,7 @@ def create_job(
         ) from exc
 
     celery_app.send_task("app.workers.tasks.process_job", args=[str(job.id)])
-    JOBS_CREATED.labels(operation=operation).inc()
+    JOBS_CREATED.labels(operation=operation.value).inc()
 
     return JobCreateResponse(
         id=job.id,
@@ -188,10 +189,10 @@ def list_jobs(
         list[JobStatus] | None,
         Query(alias="status", description="Filtra por um ou mais status"),
     ] = None,
-    operation: Annotated[
-        str | None,
-        Query(description="Filtra por operation exata"),
-    ] = None,
+        operation: Annotated[
+            Operation | None,
+            Query(description="Filtra por operation"),
+        ] = None,
     limit: Annotated[
         int, Query(ge=1, le=100, description="Itens por pagina (1-100)")
     ] = 20,
@@ -218,7 +219,7 @@ def list_jobs(
         count_stmt = count_stmt.where(Job.status.in_(status_))
     if operation:
         stmt = stmt.where(Job.operation == operation)
-        count_stmt = count_stmt.where(Job.operation == operation)
+        count_stmt = count_stmt.where(Job.operation == operation.value)
 
     if order == "created_at:desc":
         stmt = stmt.order_by(Job.created_at.desc())

@@ -9,7 +9,7 @@ from PIL import Image
 from app.config import get_settings
 from app.database import SessionLocal
 from app.models import Job, JobStatus
-from app.storage.minio_client import download_bytes
+from app.storage.minio_client import download_bytes, get_client
 
 from tests.integration.conftest import make_png_bytes, object_exists
 
@@ -140,3 +140,38 @@ def test_processa_image_thumbnail_end_to_end(client):
     assert img.format == "PNG"
     assert img.width == 50
     assert img.height == 50
+
+    def test_post_jobs_operation_invalida_rejeita_antes_do_upload(client, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            "app.api.jobs.celery_app.send_task",
+            lambda *a, **kw: calls.append(a),
+        )
+
+        response = client.post(
+            "/jobs",
+            files={"file": ("test.png", make_png_bytes(), "image/png")},
+            data={"operation": "image.thumbnai"},
+        )
+
+        assert response.status_code == 422
+        error = response.json()["detail"][0]
+        assert error["loc"] == ["body", "operation"]
+        assert "image.thumbnail" in error["msg"]
+
+        with SessionLocal() as db:
+            assert db.query(Job).count() == 0
+
+        settings = get_settings()
+        objects = list(
+            get_client().list_objects(settings.minio_bucket_input, recursive=True)
+        )
+        assert objects == []
+
+        assert calls == []
+
+
+def test_list_jobs_filtro_operation_invalida_retorna_422(client):
+    response = client.get("/jobs", params={"operation": "nao.existe"})
+
+    assert response.status_code == 422
