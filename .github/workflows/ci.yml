@@ -64,10 +64,12 @@ jobs:
             fonts-liberation
 
       - name: Verify system binaries
+        shell: bash
         run: |
           ffmpeg -version | head -n 1
           tesseract --version | head -n 1
-          tesseract --list-langs
+          tesseract --list-langs | grep -qx por
+          tesseract --list-langs | grep -qx eng
           soffice --version
 
       - uses: actions/setup-python@v5

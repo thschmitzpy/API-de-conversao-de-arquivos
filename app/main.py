@@ -9,11 +9,60 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 
 from app.api.health import router as health_router
 from app.api.jobs import router as jobs_router
+from app.config import get_settings
 from app.logging_setup import configure_logging
 from app.rate_limit import limiter
 from app.storage.minio_client import ensure_buckets
 
 configure_logging()
+
+_settings = get_settings()
+
+API_DESCRIPTION = f"""
+  API de conversao e processamento assincrono de arquivos: imagem, CSV, Excel,
+  PDF, documentos Office, video e audio.
+
+  ## Fluxo
+
+  1. **`POST /jobs`** envia o arquivo (multipart) com a `operation` desejada e,
+     opcionalmente, `parameters` (JSON) e `callback_url`. Retorna `202 Accepted`
+     com o `id` do job e a `status_url`.
+  2. O worker Celery processa o arquivo em background.
+  3. Acompanhe o resultado de uma das formas:
+     - **Polling** em `GET /jobs/{{id}}` ate o status virar `done` ou `failed`.
+       Quando `done`, `output_url` traz um link temporario para download.
+     - **Webhook**: se `callback_url` foi informada, a API envia um `POST` com o
+       resultado, assinado com HMAC-SHA256 no header `X-Conversor-Signature`.
+
+  ## Autenticacao
+
+  Todas as rotas de `/jobs` exigem o header **`X-API-Key`**. Clique em
+  **Authorize** e informe uma das chaves definidas em `API_KEYS`.
+  Sem header: `401`. Chave invalida: `403`.
+
+  ## Rate limiting
+
+  | Rota | Limite |
+  |---|---|
+  | `POST /jobs` | {_settings.rate_limit_create_job} |
+  | `GET /jobs` e `GET /jobs/{{id}}` | {_settings.rate_limit_get_job} |
+
+  Excedido o limite, a resposta e `429 Too Many Requests`. Os headers
+  `X-RateLimit-*` informam o consumo da janela atual.
+  """
+
+OPENAPI_TAGS = [
+    {
+        "name": "jobs",
+        "description": "Criacao, consulta e listagem de jobs de processamento. "
+                       "Exige `X-API-Key`.",
+    },
+    {
+        "name": "health",
+        "description": "Probes de liveness e readiness para orquestradores. "
+                       "Publicas, sem autenticacao e fora do rate limit.",
+    },
+]
 
 
 @retry(stop=stop_after_attempt(30), wait=wait_fixed(2), reraise=True)
@@ -30,6 +79,8 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="Conversor de Arquivos",
     version="0.1.0",
+    description=API_DESCRIPTION,
+    openapi_tags=OPENAPI_TAGS,
     lifespan=lifespan,
 )
 

@@ -1,14 +1,22 @@
 import hmac
 from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, HTTPException, status
+from fastapi.security import APIKeyHeader
 
 from app.config import Settings, get_settings
 
+api_key_header = APIKeyHeader(
+    name="X-API-Key",
+    scheme_name="ApiKeyAuth",
+    description="Chave de acesso definida em API_KEYS no ambiente",
+    auto_error=False,
+)
+
 
 def require_api_key(
-        x_api_key: Annotated[str | None, Header(alias="X-API-Key")] = None,
-        settings: Annotated[Settings, Depends(get_settings)] = None,
+    x_api_key: Annotated[str | None, Depends(api_key_header)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> None:
     allowed = settings.allowed_api_keys
 

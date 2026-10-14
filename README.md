@@ -272,7 +272,9 @@ Cobertura atual: **250+ testes** em 19 suites — processors (unit), webhook (co
 O workflow `.github/workflows/ci.yml` roda a cada push e pull request na branch `main`, com dois jobs:
 
 - **`lint`** — Ruff check sobre todo o código.
-- **`test`** — sobe Postgres, Redis e MinIO via `docker compose`, instala Python 3.13 + Poetry + FFmpeg no runner, aplica migrations Alembic, inicia o worker Celery em background e executa toda a suite `pytest`.
+- **`test`** — sobe Postgres, Redis e MinIO via `docker compose`, instala Python 3.13 + Poetry e os binários de sistema dos processors (FFmpeg, Tesseract com `eng`/`por` e LibreOffice headless) no runner, aplica migrations Alembic, inicia o worker Celery em background e executa toda a suite `pytest`.
+
+Os testes de vídeo, áudio, OCR e conversão de documentos usam `skipif` quando o binário correspondente não existe — útil localmente, perigoso no CI, porque uma instalação quebrada transformaria falhas em testes pulados sem ninguém notar. Por isso o step **Verify system binaries** chama `ffmpeg`, `tesseract` e `soffice` antes da suite: se algum faltar, o pipeline falha ali, e o badge verde significa que **todos** os processors foram de fato exercitados.
 
 Em caso de falha, o step final despeja o `celery.log` para facilitar o diagnóstico.
 
