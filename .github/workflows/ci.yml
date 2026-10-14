@@ -50,8 +50,25 @@ jobs:
       - name: Start services (Postgres, Redis, MinIO)
         run: docker compose up -d postgres redis minio
 
-      - name: Install FFmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install system dependencies (FFmpeg, Tesseract, LibreOffice)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ffmpeg \
+            tesseract-ocr \
+            tesseract-ocr-eng \
+            tesseract-ocr-por \
+            libreoffice-writer-nogui \
+            libreoffice-calc-nogui \
+            libreoffice-impress-nogui \
+            fonts-liberation
+
+      - name: Verify system binaries
+        run: |
+          ffmpeg -version | head -n 1
+          tesseract --version | head -n 1
+          tesseract --list-langs
+          soffice --version
 
       - uses: actions/setup-python@v5
         with:
