@@ -40,6 +40,7 @@ def test_get_job_respeita_limite(client: TestClient) -> None:
     resp = client.get(f"/jobs/{fake_id}")
     assert resp.status_code == 429
     assert "Retry-After" in resp.headers or "retry-after" in resp.headers
+    assert resp.json()["detail"].startswith("Limite de requisicoes excedido")
 
 
 def test_create_job_respeita_limite(client: TestClient) -> None:

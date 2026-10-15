@@ -77,4 +77,4 @@ class WebhookPayload(BaseModel):
 
 
 class ErrorResponse(BaseModel):
-    detail: str
+    detail: str = Field(description="Mensagem legivel descrevendo o erro")

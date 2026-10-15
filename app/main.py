@@ -1,8 +1,8 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
+from fastapi.responses import JSONResponse, Response
 from prometheus_fastapi_instrumentator import Instrumentator
-from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from tenacity import retry, stop_after_attempt, wait_fixed
@@ -84,8 +84,19 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
+def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> Response:
+    response = JSONResponse(
+        {"detail": f"Limite de requisicoes excedido: {exc.detail}"},
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+    )
+    return request.app.state.limiter._inject_headers(
+        response, request.state.view_rate_limit
+    )
+
+
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 app.add_middleware(SlowAPIMiddleware)
 
 Instrumentator(

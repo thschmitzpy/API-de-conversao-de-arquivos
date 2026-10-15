@@ -28,6 +28,7 @@ from app.operations import Operation
 from app.rate_limit import limiter
 from app.models import Job, JobStatus
 from app.schemas import (
+    ErrorResponse,
     JobCreateResponse,
     JobListResponse,
     JobStatusResponse,
@@ -39,10 +40,27 @@ from app.storage.minio_client import (
     upload_stream,
 )
 
+
+def _error(description: str, example: str) -> dict[str, Any]:
+    return {
+        "model": ErrorResponse,
+        "description": description,
+        "content": {"application/json": {"example": {"detail": example}}},
+    }
+
+
 router = APIRouter(
     prefix="/jobs",
     tags=["jobs"],
     dependencies=[Depends(require_api_key)],
+    responses={
+        401: _error("Header X-API-Key ausente", "Header X-API-Key ausente"),
+        403: _error("API key invalida", "API key invalida"),
+        429: _error(
+            "Limite de requisicoes excedido",
+            "Limite de requisicoes excedido: 10 per 1 minute",
+        ),
+    },
 )
 
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
@@ -78,6 +96,15 @@ def _safe_filename(raw: str) -> str:
     response_model=JobCreateResponse,
     status_code=status.HTTP_202_ACCEPTED,
     summary="Cria um novo job de processamento",
+    responses={
+        400: _error(
+            "Arquivo sem nome, vazio ou parameters com JSON invalido",
+            "Arquivo vazio",
+        ),
+        413: _error("Arquivo acima do limite de upload", "Arquivo excede o limite de 100 MB"),
+        500: _error("Falha ao registrar o job no banco", "Falha ao registrar job"),
+        502: _error("Falha ao salvar o arquivo no storage", "Falha ao salvar arquivo no storage"),
+    },
 )
 @limiter.limit(get_settings().rate_limit_create_job)
 def create_job(
@@ -180,6 +207,12 @@ _ALLOWED_ORDERS = {"created_at:desc", "created_at:asc"}
     response_model=JobListResponse,
     name="list_jobs",
     summary="Lista jobs com paginacao e filtros",
+    responses={
+        400: _error(
+            "Valor de order nao suportado",
+            "order invalido. Aceitos: ['created_at:asc', 'created_at:desc']",
+        ),
+    },
 )
 @limiter.limit(get_settings().rate_limit_get_job)
 def list_jobs(
@@ -242,7 +275,7 @@ def list_jobs(
     response_model=JobStatusResponse,
     name="get_job",
     summary="Consulta o estado de um job",
-    responses={404: {"description": "Job nao encontrado"}},
+    responses={404: _error("Job nao encontrado", "Job nao encontrado")},
 )
 @limiter.limit(get_settings().rate_limit_get_job)
 def get_job(
