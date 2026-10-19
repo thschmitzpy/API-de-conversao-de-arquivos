@@ -24,7 +24,7 @@ from app.broker.celery_app import celery_app
 from app.config import get_settings
 from app.database import get_db
 from app.metrics import JOBS_CREATED
-from app.operations import Operation
+from app.operations import Operation, parameter_examples_markdown
 from app.rate_limit import limiter
 from app.models import Job, JobStatus
 from app.schemas import (
@@ -96,6 +96,11 @@ def _safe_filename(raw: str) -> str:
     response_model=JobCreateResponse,
     status_code=status.HTTP_202_ACCEPTED,
     summary="Cria um novo job de processamento",
+    description=(
+            "Envia o arquivo e enfileira o processamento. O campo `parameters` e um "
+            "objeto JSON cujas chaves dependem da `operation`; chaves omitidas usam "
+            "o default do processor.\n\n" + parameter_examples_markdown()
+    ),
     responses={
         400: _error(
             "Arquivo sem nome, vazio ou parameters com JSON invalido",
@@ -106,24 +111,30 @@ def _safe_filename(raw: str) -> str:
         502: _error("Falha ao salvar o arquivo no storage", "Falha ao salvar arquivo no storage"),
     },
 )
+
+
 @limiter.limit(get_settings().rate_limit_create_job)
 def create_job(
-    request: Request,
-    response: Response,
-    file: Annotated[UploadFile, File(description="Arquivo a ser processado")],
+        request: Request,
+        response: Response,
+        file: Annotated[UploadFile, File(description="Arquivo a ser processado")],
         operation: Annotated[
             Operation,
             Form(description="Operacao a executar sobre o arquivo"),
         ],
-    parameters: Annotated[
-        str | None,
-        Form(description="JSON com parametros especificos da operacao"),
-    ] = None,
-    callback_url: Annotated[
-        str | None,
-        Form(description="URL que recebera POST assinado ao concluir"),
-    ] = None,
-    db: Session = Depends(get_db),
+        parameters: Annotated[
+            str | None,
+            Form(
+                description="JSON com parametros especificos da operacao "
+                            "(veja a tabela de exemplos acima)",
+                examples=['{"width": 256, "height": 256, "format": "webp"}'],
+            ),
+        ] = None,
+        callback_url: Annotated[
+            str | None,
+            Form(description="URL que recebera POST assinado ao concluir"),
+        ] = None,
+        db: Session = Depends(get_db),
 ) -> JobCreateResponse:
     if not file.filename:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Arquivo sem nome")
