@@ -174,7 +174,7 @@ Resposta:
 
 ### 4. Receber webhook ao concluir
 
-Passe `-F "callback_url=https://seu-endpoint/..."` no `POST /jobs`. Ao finalizar, o worker envia `POST` no endpoint com o payload JSON do resultado, assinado no header `X-Signature` usando HMAC-SHA256 e o segredo `WEBHOOK_SIGNING_SECRET` do `.env`. Em caso de falha HTTP, o notifier faz retry exponencial via tenacity.
+Passe `-F "callback_url=https://seu-endpoint/..."` no `POST /jobs`. Ao finalizar, o worker envia `POST` no endpoint com o payload JSON do resultado, assinado no header `X-Conversor-Signature` (`sha256=<hmac hex>`) usando HMAC-SHA256 sobre o corpo bruto e o segredo `WEBHOOK_SIGNING_SECRET` do `.env`. Respostas 5xx, timeout e erros de rede disparam retry exponencial via tenacity; 4xx é tratado como falha definitiva. O formato completo do payload, com exemplos, está na seção **Webhooks** do `/docs`.
 
 ---
 

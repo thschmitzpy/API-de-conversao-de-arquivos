@@ -13,6 +13,7 @@ from app.config import get_settings
 from app.logging_setup import configure_logging
 from app.rate_limit import limiter
 from app.storage.minio_client import ensure_buckets
+from app.webhook.openapi import register_webhook_docs
 
 configure_logging()
 
@@ -32,7 +33,8 @@ API_DESCRIPTION = f"""
      - **Polling** em `GET /jobs/{{id}}` ate o status virar `done` ou `failed`.
        Quando `done`, `output_url` traz um link temporario para download.
      - **Webhook**: se `callback_url` foi informada, a API envia um `POST` com o
-       resultado, assinado com HMAC-SHA256 no header `X-Conversor-Signature`.
+         resultado, assinado com HMAC-SHA256 no header `X-Conversor-Signature`.
+         Payload, verificacao e regras de retry na secao **Webhooks** no fim da pagina.
 
   ## Autenticacao
 
@@ -105,3 +107,4 @@ Instrumentator(
 
 app.include_router(health_router)
 app.include_router(jobs_router)
+register_webhook_docs(app)
