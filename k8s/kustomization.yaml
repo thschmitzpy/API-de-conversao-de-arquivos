@@ -1,0 +1,32 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: conversor
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: conversor-arquivos
+
+resources:
+  - namespace.yaml
+
+configMapGenerator:
+  - name: conversor-config
+    literals:
+      - POSTGRES_DB=conversor
+      - POSTGRES_USER=conversor
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - RATE_LIMIT_STORAGE_URL=redis://redis:6379/2
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_PUBLIC_ENDPOINT=localhost:9000
+      - MINIO_BUCKET_INPUT=inputs
+      - MINIO_BUCKET_OUTPUT=outputs
+      - MINIO_SECURE=false
+      - WEBHOOK_MAX_RETRIES=5
+      - WEBHOOK_TIMEOUT_SECONDS=10
+
+secretGenerator:
+  - name: conversor-secrets
+    envs:
+      - secrets.env
