@@ -15,7 +15,7 @@ _PAYLOAD_EXAMPLES: dict[str, Any] = {
             "job_id": "3f2b8c1e-7a4d-4e8b-9c1a-2d5e6f7a8b9c",
             "status": "DONE",
             "operation": "image.thumbnail",
-            "output_url": "http://localhost:9000/outputs/3f2b8c1e-.../foto.webp?X-Amz-Signature=...",
+            "output_url": "http://localhost:9000/outputs/3f2b8c1e-7a4d-4e8b-9c1a-2d5e6f7a8b9c/output.webp?X-Amz-Signature=...",
             "result_metadata": {"width": 256, "height": 171, "format": "WEBP", "size_bytes": 8412},
             "error_message": None,
             "finished_at": "2026-10-19T14:32:07.512000Z",
