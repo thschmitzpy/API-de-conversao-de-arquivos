@@ -9,6 +9,9 @@ labels:
 
 resources:
   - namespace.yaml
+  - postgres.yaml
+  - redis.yaml
+  - minio.yaml
 
 configMapGenerator:
   - name: conversor-config
