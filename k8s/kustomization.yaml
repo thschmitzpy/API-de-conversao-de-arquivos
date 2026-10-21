@@ -12,6 +12,8 @@ resources:
   - postgres.yaml
   - redis.yaml
   - minio.yaml
+  - api.yaml
+  - worker.yaml
 
 configMapGenerator:
   - name: conversor-config
