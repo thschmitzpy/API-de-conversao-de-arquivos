@@ -1,6 +1,9 @@
+import os
+import shutil
+
 from celery import Celery
-from celery.signals import setup_logging, worker_ready
-from prometheus_client import start_http_server
+from celery.signals import setup_logging, worker_init, worker_ready
+from prometheus_client import CollectorRegistry, multiprocess, start_http_server
 
 from app.config import get_settings
 from app.logging_setup import configure_logging
@@ -31,7 +34,18 @@ celery_app.conf.update(
 def _configure_logging(**_: object) -> None:
     configure_logging()
 
+@worker_init.connect
+def _reset_multiprocess_metrics(**_: object) -> None:
+    path = os.environ.get("PROMETHEUS_MULTIPROC_DIR")
+    if path:
+        shutil.rmtree(path, ignore_errors=True)
+        os.makedirs(path)
 
 @worker_ready.connect
-def _start_metrics_server(**_: object) -> None:
-    start_http_server(settings.metrics_port)
+def _start_metrics_server(**_: object) -> None:  # Com prefork as tasks rodam nos processos filhos e o HTTP fica no pai.
+    if os.environ.get("PROMETHEUS_MULTIPROC_DIR"):
+        registry = CollectorRegistry()
+        multiprocess.MultiProcessCollector(registry)
+        start_http_server(settings.metrics_port, registry=registry)
+    else:
+        start_http_server(settings.metrics_port)
