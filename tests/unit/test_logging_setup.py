@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+from datetime import datetime
 
 import pytest
 
@@ -33,7 +34,17 @@ def test_output_e_json_valido_com_campos_base(capture_json):
     assert rec["message"] == "ola mundo"
     assert rec["level"] == "INFO"
     assert rec["logger"] == "teste"
-    assert "timestamp" in rec
+    assert "taskName" not in rec
+
+
+def test_timestamp_e_iso8601_com_timezone(capture_json):
+    logging.getLogger("teste").info("ola mundo")
+
+    rec = _parse(capture_json)[0]
+    ts = datetime.fromisoformat(rec["timestamp"])
+
+    assert ts.tzinfo is not None
+    assert next(iter(rec)) == "timestamp"
 
 
 def test_extra_vira_campo_toplevel(capture_json):
