@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
   pull_request:
-    branches: [main]
+    branches: [ main ]
 
 jobs:
   lint:
@@ -105,3 +105,41 @@ jobs:
       - name: Stop services
         if: always()
         run: docker compose down -v
+
+  k8s:
+    runs-on: ubuntu-latest
+    env:
+      KUBECONFORM_VERSION: v0.6.7
+    steps:
+      - uses: actions/checkout@v4
+
+      # O kustomize nao le arquivos fora de k8s/ (load restrictor), entao os arquivos do
+      # Grafana existem em dois lugares. O prometheus.yml fica de fora: o do cluster e
+      # diferente de proposito (dns_sd_configs no Service headless do worker).
+      - name: Check drift monitoring/ x k8s/monitoring/
+        run: |
+          status=0
+          check() {
+            if ! diff -u "$1" "$2"; then
+              echo "::error file=$2::$2 divergiu de $1 - copie o arquivo de monitoring/ para k8s/monitoring/"
+              status=1
+            fi
+          }
+          check monitoring/grafana/dashboards/conversor.json k8s/monitoring/grafana/conversor.json
+          check monitoring/grafana/provisioning/dashboards/dashboards.yml k8s/monitoring/grafana/dashboards.yml
+          check monitoring/grafana/provisioning/datasources/prometheus.yml k8s/monitoring/grafana/datasources.yml
+          exit $status
+
+      - name: Install kubeconform
+        run: |
+          curl -sSfL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin kubeconform
+          kubeconform -v
+
+      - name: Render manifests (kustomize)
+        run: |
+          cp k8s/secrets.env.example k8s/secrets.env
+          kubectl kustomize k8s > rendered.yaml
+
+      - name: Validate manifests (kubeconform)
+        run: kubeconform -strict -summary rendered.yaml

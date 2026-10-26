@@ -2,7 +2,7 @@
 
 API Python/FastAPI de **conversão e processamento assíncrono de arquivos** (imagem, CSV, Excel, PDF, vídeo e áudio), com fila Celery, armazenamento S3-compatível e notificação por webhook assinado.
 
-Projeto de portfólio — foco em arquitetura clara, testes e empacotamento Docker completo.
+Projeto de portfólio — foco em arquitetura clara, testes, empacotamento Docker completo e deploy em Kubernetes.
 
 ![CI](https://github.com/thschmitzpy/API-de-conversao-de-arquivos/actions/workflows/ci.yml/badge.svg)
 
@@ -20,7 +20,7 @@ Projeto de portfólio — foco em arquitetura clara, testes e empacotamento Dock
 | Rate limiting | slowapi |
 | Observabilidade | Prometheus + Grafana + logs estruturados JSON |
 | Testes | pytest (250+ casos, incluindo integração end-to-end) |
-| Deploy | Docker Compose |
+| Deploy | Docker Compose · Kubernetes (Kustomize) |
 
 Python 3.13 · Poetry 1.8
 
@@ -109,6 +109,53 @@ Para parar:
 ```bash
 docker compose down            # mantém os volumes (banco e storage)
 docker compose down -v         # também apaga os volumes
+```
+
+---
+
+## Kubernetes
+
+O mesmo stack roda num cluster Kubernetes local, descrito com Kustomize em `k8s/`. O alvo é o Kubernetes embutido no Docker Desktop (modo **kind**, v1.34): os Services `LoadBalancer` respondem em `localhost`, então as URLs são as mesmas do compose.
+
+Pré-requisitos: Docker Desktop com Kubernetes habilitado (Settings → Kubernetes → kind) e `kubectl` apontando para o contexto dele.
+
+```powershell
+docker compose stop                                   # o cluster usa as mesmas portas
+Copy-Item k8s/secrets.env.example k8s/secrets.env     # segredos locais, fora do git
+./k8s/load-images.ps1                                 # builda api/worker e importa no nó do kind
+kubectl apply -k k8s
+kubectl -n conversor get pods -w
+```
+
+O nó do kind tem um containerd próprio e não enxerga as imagens do Docker local. Por isso os manifests usam `imagePullPolicy: Never` e o `load-images.ps1` builda, exporta (`docker save`) e importa as imagens direto no nó. Depois de alterar código:
+
+```powershell
+./k8s/load-images.ps1
+kubectl -n conversor rollout restart deploy/api deploy/worker
+```
+
+API (8000), MinIO (9000/9001), Grafana (3000) e Prometheus (9090) ficam nas mesmas portas do compose. O Postgres fica só dentro do cluster:
+
+```powershell
+kubectl -n conversor port-forward svc/postgres 5434:5432
+```
+
+| Componente | Recursos | Detalhes |
+|---|---|---|
+| `api` | Deployment (1 réplica) + LoadBalancer 8000 | initContainer roda `alembic upgrade head`; startup/liveness em `/health`, readiness em `/ready` |
+| `worker` | Deployment (2 réplicas) + Service headless | `terminationGracePeriodSeconds: 120` para terminar o job em andamento antes de sair |
+| `postgres` | StatefulSet + PVC 1Gi | Service ClusterIP |
+| `minio` | StatefulSet + PVC 5Gi + LoadBalancer 9000/9001 | mesmo `MINIO_PUBLIC_ENDPOINT=localhost:9000` do compose |
+| `redis` | Deployment | sem persistência — broker, result backend e storage do rate limit |
+| `prometheus` | StatefulSet + PVC 2Gi + LoadBalancer 9090 | descobre cada pod do worker via DNS do Service headless |
+| `grafana` | Deployment + LoadBalancer 3000 | sem PVC — datasource e dashboard vêm de ConfigMaps |
+
+A config não sensível vem de um `configMapGenerator` e os segredos de um `secretGenerator` lido de `k8s/secrets.env`. O sufixo de hash que o Kustomize põe nos nomes faz os pods serem recriados sozinhos quando a config muda.
+
+Para remover tudo, inclusive volumes:
+
+```powershell
+kubectl delete -k k8s
 ```
 
 ---
@@ -269,10 +316,13 @@ Cobertura atual: **250+ testes** em 19 suites — processors (unit), webhook (co
 
 ## Integração contínua
 
-O workflow `.github/workflows/ci.yml` roda a cada push e pull request na branch `main`, com dois jobs:
+O workflow `.github/workflows/ci.yml` roda a cada push e pull request na branch `main`, com três jobs:
 
 - **`lint`** — Ruff check sobre todo o código.
 - **`test`** — sobe Postgres, Redis e MinIO via `docker compose`, instala Python 3.13 + Poetry e os binários de sistema dos processors (FFmpeg, Tesseract com `eng`/`por` e LibreOffice headless) no runner, aplica migrations Alembic, inicia o worker Celery em background e executa toda a suite `pytest`.
+- **`k8s`** — renderiza os manifests com `kubectl kustomize k8s` e valida o resultado com [kubeconform](https://github.com/yannh/kubeconform) em modo `-strict` (campo desconhecido ou com tipo errado reprova o build). Antes disso, compara os arquivos do Grafana em `monitoring/` com as cópias em `k8s/monitoring/`.
+
+As cópias existem porque o Kustomize não lê arquivos fora do diretório da kustomization. Sem a verificação, mexer no dashboard do compose e esquecer da cópia faria os dois ambientes divergirem sem nenhum erro aparente.
 
 Os testes de vídeo, áudio, OCR e conversão de documentos usam `skipif` quando o binário correspondente não existe — útil localmente, perigoso no CI, porque uma instalação quebrada transformaria falhas em testes pulados sem ninguém notar. Por isso o step **Verify system binaries** chama `ffmpeg`, `tesseract` e `soffice` antes da suite: se algum faltar, o pipeline falha ali, e o badge verde significa que **todos** os processors foram de fato exercitados.
 
@@ -300,7 +350,11 @@ app/
 ├── operations.py     Enum Operation (fonte única das operações aceitas)
 ├── rate_limit.py     Limiter slowapi
 └── schemas.py        Pydantic DTOs
+k8s/                  Manifests Kustomize (api, worker, postgres, redis, minio, prometheus, grafana)
+├── monitoring/       Configs do Prometheus/Grafana para o cluster
+└── load-images.ps1   Build + import das imagens no nó do kind
 migrations/           Alembic
+monitoring/           Configs do Prometheus/Grafana para o compose
 tests/
 ├── processors/       Testes unitários dos processors
 ├── integration/      End-to-end contra Postgres/Redis/MinIO reais do compose
@@ -323,6 +377,9 @@ tests/
 - **Detecção de formato por conteúdo** em `ocr.extract` e `document.convert` — magic bytes e estrutura interna (streams OLE2, diretórios OOXML, `mimetype` ODF) em vez de confiar na extensão ou no `content_type` do upload.
 - **LibreOffice com perfil isolado por job** (`-env:UserInstallation` em diretório temporário) — com `--concurrency=2`, duas instâncias no perfil padrão se bloqueiam e a segunda sai sem converter. O `soffice` roda em sessão própria para que o timeout mate o grupo inteiro de processos, sem deixar `soffice.bin` órfão.
 - **Enum Postgres explícito** para `job_status` — criado na migration, mais confiável do que depender da criação automática pelo SQLAlchemy.
+- **Migration em initContainer** no Kubernetes — o Alembic roda antes do container da API subir, e a API fica com 1 réplica porque duas migrations concorrentes no mesmo banco disputariam o lock da `alembic_version`.
+- **Métricas do worker em modo multiprocess** — com o pool prefork do Celery, as tasks rodam nos processos filhos, mas o HTTP server de métricas fica no pai. Com `PROMETHEUS_MULTIPROC_DIR`, cada filho grava as métricas em arquivo e o `MultiProcessCollector` soma tudo no scrape. Sem isso, `jobs_finished_total` e `job_processing_seconds` nunca apareciam.
+- **Prometheus com `dns_sd_configs` no Service headless do worker** — cada réplica vira um target próprio. Um target estático `worker:9100` cairia em um pod aleatório a cada scrape.
 
 ---
 
