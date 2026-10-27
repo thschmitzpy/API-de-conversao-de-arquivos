@@ -32,6 +32,7 @@ configMapGenerator:
       - MINIO_SECURE=false
       - WEBHOOK_MAX_RETRIES=5
       - WEBHOOK_TIMEOUT_SECONDS=10
+      - FORWARDED_ALLOW_IPS=*
   - name: prometheus-config
     files:
       - monitoring/prometheus.yml

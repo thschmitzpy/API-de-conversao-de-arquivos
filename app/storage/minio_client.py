@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+from collections.abc import Iterator
 from datetime import timedelta
 from functools import lru_cache
 from typing import BinaryIO
@@ -44,11 +45,11 @@ def ensure_buckets() -> None:
 
 
 def upload_stream(
-    bucket: str,
-    key: str,
-    stream: BinaryIO,
-    size: int,
-    content_type: str,
+        bucket: str,
+        key: str,
+        stream: BinaryIO,
+        size: int,
+        content_type: str,
 ) -> None:
     get_client().put_object(
         bucket_name=bucket,
@@ -76,6 +77,24 @@ def presigned_get_url(bucket: str, key: str, expires_seconds: int = 3600) -> str
         object_name=key,
         expires=timedelta(seconds=expires_seconds),
     )
+
+
+def open_stream(
+        bucket: str,
+        key: str,
+        chunk_size: int = 64 * 1024,
+) -> tuple[Iterator[bytes], int | None]:
+    obj = get_client().get_object(bucket, key)
+    length = obj.headers.get("Content-Length")
+
+    def _chunks() -> Iterator[bytes]:
+        try:
+            yield from obj.stream(chunk_size)
+        finally:
+            obj.close()
+            obj.release_conn()
+
+    return _chunks(), int(length) if length else None
 
 
 def delete_object(bucket: str, key: str) -> None:

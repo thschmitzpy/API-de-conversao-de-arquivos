@@ -1,8 +1,9 @@
 import io
 import json
 import uuid
-from pathlib import PureWindowsPath
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import Annotated, Any
+from urllib.parse import quote
 
 from fastapi import (
     APIRouter,
@@ -16,6 +17,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -36,6 +38,7 @@ from app.schemas import (
 )
 from app.storage.minio_client import (
     delete_object,
+    open_stream,
     presigned_get_url,
     upload_stream,
 )
@@ -111,8 +114,6 @@ def _safe_filename(raw: str) -> str:
         502: _error("Falha ao salvar o arquivo no storage", "Falha ao salvar arquivo no storage"),
     },
 )
-
-
 @limiter.limit(get_settings().rate_limit_create_job)
 def create_job(
         request: Request,
@@ -227,27 +228,27 @@ _ALLOWED_ORDERS = {"created_at:desc", "created_at:asc"}
 )
 @limiter.limit(get_settings().rate_limit_get_job)
 def list_jobs(
-    request: Request,
-    response: Response,
-    status_: Annotated[
-        list[JobStatus] | None,
-        Query(alias="status", description="Filtra por um ou mais status"),
-    ] = None,
+        request: Request,
+        response: Response,
+        status_: Annotated[
+            list[JobStatus] | None,
+            Query(alias="status", description="Filtra por um ou mais status"),
+        ] = None,
         operation: Annotated[
             Operation | None,
             Query(description="Filtra por operation"),
         ] = None,
-    limit: Annotated[
-        int, Query(ge=1, le=100, description="Itens por pagina (1-100)")
-    ] = 20,
-    offset: Annotated[
-        int, Query(ge=0, description="Offset a partir do inicio")
-    ] = 0,
-    order: Annotated[
-        str,
-        Query(description="Ordenacao: created_at:desc (default) ou created_at:asc"),
-    ] = "created_at:desc",
-    db: Session = Depends(get_db),
+        limit: Annotated[
+            int, Query(ge=1, le=100, description="Itens por pagina (1-100)")
+        ] = 20,
+        offset: Annotated[
+            int, Query(ge=0, description="Offset a partir do inicio")
+        ] = 0,
+        order: Annotated[
+            str,
+            Query(description="Ordenacao: created_at:desc (default) ou created_at:asc"),
+        ] = "created_at:desc",
+        db: Session = Depends(get_db),
 ) -> JobListResponse:
     if order not in _ALLOWED_ORDERS:
         raise HTTPException(
@@ -290,10 +291,10 @@ def list_jobs(
 )
 @limiter.limit(get_settings().rate_limit_get_job)
 def get_job(
-    request: Request,
-    response: Response,
-    job_id: uuid.UUID,
-    db: Session = Depends(get_db),
+        request: Request,
+        response: Response,
+        job_id: uuid.UUID,
+        db: Session = Depends(get_db),
 ) -> JobStatusResponse:
     job = db.get(Job, job_id)
     if job is None:
@@ -309,3 +310,75 @@ def get_job(
         )
 
     return response
+
+
+def _download_filename(job: Job) -> str:
+    stem = PurePosixPath(job.input_filename).stem or "resultado"
+    extension = PurePosixPath(job.output_key or "").suffix
+    return f"{stem}{extension}"
+
+
+def _content_disposition(filename: str) -> str:
+    fallback = filename.encode("ascii", "ignore").decode().replace('"', "") or "resultado"
+    return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(filename)}"
+
+
+@router.get(
+    "/{job_id}/download",
+    name="download_job_output",
+    summary="Baixa o arquivo resultante do job",
+    description=(
+            "Transmite o resultado direto do storage, sem expor o MinIO ao cliente. "
+            "Disponivel apenas quando o status e `DONE`. O nome do arquivo segue o "
+            "original com a extensao do resultado (ex.: `foto.jpg` -> `foto.webp`)."
+    ),
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Conteudo binario do resultado",
+            "content": {"application/octet-stream": {}},
+        },
+        404: _error("Job nao encontrado", "Job nao encontrado"),
+        409: _error(
+            "Job sem resultado disponivel (status diferente de DONE)",
+            "Job sem resultado para download (status: PROCESSING)",
+        ),
+        502: _error("Falha ao ler o resultado no storage", "Falha ao ler arquivo no storage"),
+    },
+)
+
+
+@limiter.limit(get_settings().rate_limit_get_job)
+def download_job_output(
+        request: Request,
+        response: Response,
+        job_id: uuid.UUID,
+        db: Session = Depends(get_db),
+) -> StreamingResponse:
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Job nao encontrado")
+
+    if job.status != JobStatus.DONE or not job.output_key:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Job sem resultado para download (status: {job.status.value})",
+        )
+
+    try:
+        chunks, length = open_stream(get_settings().minio_bucket_output, job.output_key)
+    except Exception as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "Falha ao ler arquivo no storage",
+        ) from exc
+
+    headers = {"Content-Disposition": _content_disposition(_download_filename(job))}
+    if length is not None:
+        headers["Content-Length"] = str(length)
+
+    return StreamingResponse(
+        chunks,
+        media_type=job.output_content_type or "application/octet-stream",
+        headers=headers,
+    )
