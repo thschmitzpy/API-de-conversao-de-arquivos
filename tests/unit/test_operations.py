@@ -14,10 +14,11 @@ def test_todo_processor_tem_operation_na_api():
 
     assert not extra, f"Processor fora do enum Operation: {sorted(extra)}"
 
-    def test_toda_operation_tem_exemplo_de_parameters():
-        missing = set(Operation) - set(PARAMETER_EXAMPLES)
 
-        assert not missing, f"Operation sem exemplo de parameters: {sorted(missing)}"
+def test_toda_operation_tem_exemplo_de_parameters():
+    missing = set(Operation) - set(PARAMETER_EXAMPLES)
+
+    assert not missing, f"Operation sem exemplo de parameters: {sorted(missing)}"
 
 
 def test_tabela_de_exemplos_lista_todas_as_operations():

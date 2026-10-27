@@ -141,34 +141,35 @@ def test_processa_image_thumbnail_end_to_end(client):
     assert img.width == 50
     assert img.height == 50
 
-    def test_post_jobs_operation_invalida_rejeita_antes_do_upload(client, monkeypatch):
-        calls = []
-        monkeypatch.setattr(
-            "app.api.jobs.celery_app.send_task",
-            lambda *a, **kw: calls.append(a),
-        )
 
-        response = client.post(
-            "/jobs",
-            files={"file": ("test.png", make_png_bytes(), "image/png")},
-            data={"operation": "image.thumbnai"},
-        )
+def test_post_jobs_operation_invalida_rejeita_antes_do_upload(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "app.api.jobs.celery_app.send_task",
+        lambda *a, **kw: calls.append(a),
+    )
 
-        assert response.status_code == 422
-        error = response.json()["detail"][0]
-        assert error["loc"] == ["body", "operation"]
-        assert "image.thumbnail" in error["msg"]
+    response = client.post(
+        "/jobs",
+        files={"file": ("test.png", make_png_bytes(), "image/png")},
+        data={"operation": "image.thumbnai"},
+    )
 
-        with SessionLocal() as db:
-            assert db.query(Job).count() == 0
+    assert response.status_code == 422
+    error = response.json()["detail"][0]
+    assert error["loc"] == ["body", "operation"]
+    assert "image.thumbnail" in error["msg"]
 
-        settings = get_settings()
-        objects = list(
-            get_client().list_objects(settings.minio_bucket_input, recursive=True)
-        )
-        assert objects == []
+    with SessionLocal() as db:
+        assert db.query(Job).count() == 0
 
-        assert calls == []
+    settings = get_settings()
+    objects = list(
+        get_client().list_objects(settings.minio_bucket_input, recursive=True)
+    )
+    assert objects == []
+
+    assert calls == []
 
 
 def test_list_jobs_filtro_operation_invalida_retorna_422(client):
