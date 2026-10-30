@@ -1,0 +1,64 @@
+# A imagem oficial do nginx roda o envsubst neste template ao subir o container.
+# Só variáveis de ambiente definidas são trocadas; as do nginx ($host, $uri...) ficam intactas.
+
+server {
+    listen 80;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    gzip on;
+    gzip_types text/css application/javascript application/json image/svg+xml;
+
+    # Mesmo teto do POST /jobs (100 MB) com folga para o envelope multipart.
+    client_max_body_size 105m;
+
+    # Herdado pelas locations de /api. A chave existe só aqui no servidor,
+    # nunca no bundle do navegador.
+    proxy_http_version 1.1;
+    proxy_set_header X-API-Key "${CONVERSOR_API_KEY}";
+    # Sobrescreve em vez de anexar: o nginx é a borda, então um X-Forwarded-For
+    # forjado pelo cliente não chega ao rate limit da API.
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    # Upload e download em streaming, sem copiar o arquivo inteiro para disco.
+    proxy_request_buffering off;
+    proxy_buffering off;
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+
+    # Só as rotas que o front usa. Como a chave é injetada aqui, liberar /api/
+    # inteiro exporia a listagem de jobs de todos os usuários.
+    location = /api/jobs {
+        limit_except POST {
+            deny all;
+        }
+        rewrite ^/api/(.*)$ /$1 break;
+        proxy_pass http://api:8000;
+    }
+
+    location ~ "^/api/jobs/[0-9a-fA-F-]{36}(/download)?$" {
+        limit_except GET {
+            deny all;
+        }
+        rewrite ^/api/(.*)$ /$1 break;
+        proxy_pass http://api:8000;
+    }
+
+    location /api/ {
+        return 404;
+    }
+
+    # Arquivos do build têm hash no nome: cache longo é seguro.
+    location /static/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    location / {
+        add_header Cache-Control "no-cache";
+        try_files $uri $uri/ /index.html;
+    }
+}

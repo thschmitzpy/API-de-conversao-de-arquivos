@@ -30,7 +30,7 @@ export default function App() {
         setEnvio((atual) => ({ ...atual, progresso }))
       );
       setEnvio((atual) => ({ ...atual, progresso: 100, jobId: criado.id }));
-    } catch (erro) {
+} catch (erro) {
       setEnvio((atual) => ({ ...atual, erro: mensagemDeErro(erro) }));
     }
   }
