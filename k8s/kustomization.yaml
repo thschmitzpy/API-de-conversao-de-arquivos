@@ -13,6 +13,7 @@ resources:
   - redis.yaml
   - minio.yaml
   - api.yaml
+  - frontend.yaml
   - worker.yaml
   - prometheus.yaml
   - grafana.yaml

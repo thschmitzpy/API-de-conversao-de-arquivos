@@ -12,6 +12,7 @@ Projeto de portfólio — foco em arquitetura clara, testes, empacotamento Docke
 
 | Camada | Tecnologia |
 |---|---|
+| Frontend | React 19 + nginx |
 | API | FastAPI 0.115 + Uvicorn |
 | Fila | Celery 5 + Redis 7 |
 | Storage | MinIO (S3-compatível) |
@@ -57,7 +58,7 @@ Fluxo:
 3. Worker consome a fila, baixa o input, chama o processor correspondente e salva o output no MinIO.
 4. Worker atualiza o `Job` no Postgres (status, `output_key`, `result_metadata`, `finished_at`).
 5. Se o cliente informou `callback_url`, worker dispara webhook assinado com HMAC-SHA256 (retry exponencial).
-6. Cliente consulta `GET /jobs/{id}` e recebe URL presigned para baixar o output direto do storage.
+6. Cliente consulta `GET /jobs/{id}` e recebe URL presigned para baixar o output direto do storage. O frontend usa `GET /jobs/{id}/download`, que entrega o arquivo pela própria API.
 
 ---
 
@@ -91,10 +92,11 @@ cp .env.example .env         # ajuste segredos se quiser
 docker compose up -d --build
 ```
 
-Isso sobe 7 containers: `api`, `worker`, `postgres`, `redis`, `minio`, `prometheus` e `grafana`. A API aplica as migrations Alembic no startup.
+Isso sobe 8 containers: `frontend`, `api`, `worker`, `postgres`, `redis`, `minio`, `prometheus` e `grafana`. A API aplica as migrations Alembic no startup.
 
 Endpoints disponíveis:
 
+- **Frontend** — http://localhost:8081
 - **API** — http://localhost:8000
 - **Swagger UI** — http://localhost:8000/docs
 - **Health / Readiness** — http://localhost:8000/health e http://localhost:8000/ready
@@ -122,7 +124,7 @@ Pré-requisitos: Docker Desktop com Kubernetes habilitado (Settings → Kubernet
 ```powershell
 docker compose stop                                   # o cluster usa as mesmas portas
 Copy-Item k8s/secrets.env.example k8s/secrets.env     # segredos locais, fora do git
-./k8s/load-images.ps1                                 # builda api/worker e importa no nó do kind
+./k8s/load-images.ps1                                 # builda api/worker/frontend e importa no nó do kind
 kubectl apply -k k8s
 kubectl -n conversor get pods -w
 ```
@@ -131,18 +133,20 @@ O nó do kind tem um containerd próprio e não enxerga as imagens do Docker loc
 
 ```powershell
 ./k8s/load-images.ps1
-kubectl -n conversor rollout restart deploy/api deploy/worker
+kubectl -n conversor rollout restart deploy/api deploy/worker deploy/frontend
 ```
 
-API (8000), MinIO (9000/9001), Grafana (3000) e Prometheus (9090) ficam nas mesmas portas do compose. O Postgres fica só dentro do cluster:
+Frontend (8081), MinIO (9000/9001), Grafana (3000) e Prometheus (9090) ficam nas mesmas portas do compose. A API e o Postgres ficam só dentro do cluster, então o acesso direto é por port-forward:
 
 ```powershell
+kubectl -n conversor port-forward svc/api 8000:8000
 kubectl -n conversor port-forward svc/postgres 5434:5432
 ```
 
 | Componente | Recursos | Detalhes |
 |---|---|---|
-| `api` | Deployment (1 réplica) + LoadBalancer 8000 | initContainer roda `alembic upgrade head`; startup/liveness em `/health`, readiness em `/ready` |
+| `frontend` | Deployment (2 réplicas) + LoadBalancer 8081 | nginx serve o build e faz proxy de `/api` com allowlist de rotas; `externalTrafficPolicy: Local` preserva o IP do cliente |
+| `api` | Deployment (1 réplica) + Service ClusterIP | initContainer roda `alembic upgrade head`; startup/liveness em `/health`, readiness em `/ready` |
 | `worker` | Deployment (2 réplicas) + Service headless | `terminationGracePeriodSeconds: 120` para terminar o job em andamento antes de sair |
 | `postgres` | StatefulSet + PVC 1Gi | Service ClusterIP |
 | `minio` | StatefulSet + PVC 5Gi + LoadBalancer 9000/9001 | mesmo `MINIO_PUBLIC_ENDPOINT=localhost:9000` do compose |
@@ -312,15 +316,24 @@ docker compose run --rm --no-deps --entrypoint="" worker pytest \
 
 Cobertura atual: **250+ testes** em 19 suites — processors (unit), webhook (com e sem retry), rate limit e integração end-to-end (POST → worker → GET → MinIO).
 
+Frontend (Node 22):
+
+```bash
+cd frontend
+npm ci
+npm test
+```
+
 ---
 
 ## Integração contínua
 
-O workflow `.github/workflows/ci.yml` roda a cada push e pull request na branch `main`, com três jobs:
+O workflow `.github/workflows/ci.yml` roda a cada push e pull request na branch `main`, com quatro jobs:
 
 - **`lint`** — Ruff check sobre todo o código.
 - **`test`** — sobe Postgres, Redis e MinIO via `docker compose`, instala Python 3.13 + Poetry e os binários de sistema dos processors (FFmpeg, Tesseract com `eng`/`por` e LibreOffice headless) no runner, aplica migrations Alembic, inicia o worker Celery em background e executa toda a suite `pytest`.
 - **`k8s`** — renderiza os manifests com `kubectl kustomize k8s` e valida o resultado com [kubeconform](https://github.com/yannh/kubeconform) em modo `-strict` (campo desconhecido ou com tipo errado reprova o build). Antes disso, compara os arquivos do Grafana em `monitoring/` com as cópias em `k8s/monitoring/`.
+- **`frontend`** — roda os testes com Jest, builda a imagem de produção e valida a config do nginx com `nginx -t`.
 
 As cópias existem porque o Kustomize não lê arquivos fora do diretório da kustomization. Sem a verificação, mexer no dashboard do compose e esquecer da cópia faria os dois ambientes divergirem sem nenhum erro aparente.
 
@@ -350,7 +363,8 @@ app/
 ├── operations.py     Enum Operation (fonte única das operações aceitas)
 ├── rate_limit.py     Limiter slowapi
 └── schemas.py        Pydantic DTOs
-k8s/                  Manifests Kustomize (api, worker, postgres, redis, minio, prometheus, grafana)
+frontend/             React (CRA) + nginx com proxy para a API
+k8s/                  Manifests Kustomize (frontend, api, worker, postgres, redis, minio, prometheus, grafana)
 ├── monitoring/       Configs do Prometheus/Grafana para o cluster
 └── load-images.ps1   Build + import das imagens no nó do kind
 migrations/           Alembic
@@ -370,7 +384,9 @@ tests/
 - **Celery + Redis** em vez de `BackgroundTasks` do FastAPI — jobs sobrevivem a restart da API e o worker escala horizontalmente de forma independente.
 - **MinIO** no lugar de S3 real — mesmo contrato S3, 100% offline, ideal para portfólio e desenvolvimento local.
 - **Postgres `jobs` como fonte da verdade** — status, parâmetros, metadados e resultado ficam no banco. O Celery só carrega o `job_id`, evitando payloads grandes na fila.
-- **Presigned URL** para o cliente baixar o output direto do storage — a API não vira proxy de arquivo.
+- **Presigned URL** para clientes da API baixarem o output direto do storage, sem a API virar proxy de arquivo. O frontend é a exceção: baixa por `GET /jobs/{id}/download`, para não depender do MinIO exposto ao navegador.
+- **Chave da API só no nginx** — o navegador nunca recebe a `X-API-Key`; o nginx a injeta nas chamadas para `/api`. Como quem passa pelo proxy já sai autenticado, ele libera só as rotas que a tela usa, e a listagem de jobs fica de fora.
+- **`X-Forwarded-For` sobrescrito na borda** — o nginx grava o IP real do cliente em vez de anexar, e no cluster a API fica em ClusterIP. Assim um cabeçalho forjado não burla o rate limit.
 - **Webhook com HMAC-SHA256** — o cliente consegue validar criptograficamente que o payload veio deste serviço.
 - **Dois endpoints MinIO** (`MINIO_ENDPOINT` interno para API/worker; `MINIO_PUBLIC_ENDPOINT` para o host da URL presigned) — resolve o problema clássico de assinatura S3 em ambiente Docker, onde o nome do serviço interno não resolve do browser.
 - **SQLAlchemy síncrono** — o Celery worker é síncrono e manter o mesmo paradigma na API elimina complexidade de bridges async/sync.

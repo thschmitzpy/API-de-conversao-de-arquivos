@@ -1,12 +1,12 @@
-# Builda as imagens da api e do worker e importa no no do kind (Docker Desktop).
+# Builda as imagens da api, do worker e do frontend e importa no no do kind (Docker Desktop).
 # O cluster kind usa um containerd proprio e nao enxerga as imagens do Docker local.
 $ErrorActionPreference = "Stop"
 
 $node = "desktop-control-plane"
-$images = @("conversorarquivos-api:latest", "conversorarquivos-worker:latest")
+$images = @("conversorarquivos-api:latest", "conversorarquivos-worker:latest", "conversorarquivos-frontend:latest")
 $tmp = Join-Path $env:TEMP "conversor-images.tar"
 
-docker compose build api worker
+docker compose build api worker frontend
 if ($LASTEXITCODE -ne 0) { throw "docker compose build falhou" }
 
 
@@ -24,4 +24,4 @@ finally {
     Remove-Item $tmp -ErrorAction SilentlyContinue
 }
 
-Write-Host "Imagens carregadas. Se os pods ja existem: kubectl -n conversor rollout restart deploy/api deploy/worker"
+Write-Host "Imagens carregadas. Se os pods ja existem: kubectl -n conversor rollout restart deploy/api deploy/worker deploy/frontend"
