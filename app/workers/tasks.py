@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from celery.utils.log import get_task_logger
+from sqlalchemy import and_, or_, update
 from sqlalchemy.orm import Session
 
 from app.broker.celery_app import celery_app
@@ -50,6 +51,9 @@ _PROCESSORS: dict[str, Processor] = {
 }
 
 
+REAPED_ERROR_MESSAGE = "O processamento foi interrompido. Envie o arquivo novamente."
+
+
 @celery_app.task(name="app.workers.tasks.process_job")
 def process_job(job_id: str) -> None:
     settings = get_settings()
@@ -74,9 +78,21 @@ def process_job(job_id: str) -> None:
             )
             JOBS_FINISHED.labels(operation=operation, status="unsupported").inc()
         else:
-            job.status = JobStatus.PROCESSING
-            job.started_at = datetime.now(timezone.utc)
+            claimed = db.execute(
+                update(Job)
+                .where(Job.id == job_uuid, Job.status == JobStatus.PENDING)
+                .values(
+                    status=JobStatus.PROCESSING,
+                    started_at=datetime.now(timezone.utc),
+                )
+            ).rowcount
             db.commit()
+            if not claimed:
+                logger.warning(
+                    "Job ja encerrado, ignorando",
+                    extra={"job_id": job_id, "operation": operation},
+                )
+                return
 
             started = time.monotonic()
             try:
@@ -129,6 +145,43 @@ def process_job(job_id: str) -> None:
         job = db.get(Job, job_uuid)
         if job is not None and job.callback_url:
             _deliver_webhook(db, job, settings)
+
+
+@celery_app.task(name="app.workers.tasks.reap_stuck_jobs")
+def reap_stuck_jobs() -> int:
+    settings = get_settings()
+    now = datetime.now(timezone.utc)
+    pending_cutoff = now - timedelta(seconds=settings.job_pending_timeout_seconds)
+    processing_cutoff = now - timedelta(seconds=settings.job_processing_timeout_seconds)
+
+    with SessionLocal() as db:
+        reaped = db.scalars(
+            update(Job)
+            .where(
+                or_(
+                    and_(Job.status == JobStatus.PENDING, Job.created_at < pending_cutoff),
+                    and_(Job.status == JobStatus.PROCESSING, Job.started_at < processing_cutoff),
+                )
+            )
+            .values(
+                status=JobStatus.FAILED,
+                error_message=REAPED_ERROR_MESSAGE,
+                finished_at=now,
+            )
+            .returning(Job)
+        ).all()
+        db.commit()
+
+        for job in reaped:
+            logger.warning(
+                "Job parado encerrado",
+                extra={"job_id": str(job.id), "operation": job.operation},
+            )
+            JOBS_FINISHED.labels(operation=job.operation, status="reaped").inc()
+            if job.callback_url:
+                _deliver_webhook(db, job, settings)
+
+    return len(reaped)
 
 
 def _deliver_webhook(db: Session, job: Job, settings: Settings) -> None:

@@ -10,7 +10,7 @@ JOBS_CREATED = Counter(
 
 JOBS_FINISHED = Counter(
     "jobs_finished_total",
-    "Total de jobs finalizados pelo worker (done, failed ou unsupported)",
+    "Total de jobs finalizados pelo worker (done, failed, unsupported ou reaped)",
     labelnames=["operation", "status"],
 )
 

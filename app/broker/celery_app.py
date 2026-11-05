@@ -27,6 +27,13 @@ celery_app.conf.update(
     task_time_limit=600,
     task_soft_time_limit=540,
     worker_prefetch_multiplier=1,
+    beat_schedule={
+        "reap-stuck-jobs": {
+            "task": "app.workers.tasks.reap_stuck_jobs",
+            "schedule": 60.0,
+            "options": {"expires": 60},
+        },
+    },
 )
 
 
@@ -34,12 +41,14 @@ celery_app.conf.update(
 def _configure_logging(**_: object) -> None:
     configure_logging()
 
+
 @worker_init.connect
 def _reset_multiprocess_metrics(**_: object) -> None:
     path = os.environ.get("PROMETHEUS_MULTIPROC_DIR")
     if path:
         shutil.rmtree(path, ignore_errors=True)
         os.makedirs(path)
+
 
 @worker_ready.connect
 def _start_metrics_server(**_: object) -> None:  # Com prefork as tasks rodam nos processos filhos e o HTTP fica no pai.

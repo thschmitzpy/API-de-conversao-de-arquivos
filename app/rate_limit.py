@@ -11,4 +11,5 @@ limiter = Limiter(
     enabled=_settings.rate_limit_enabled,
     strategy="moving-window",
     headers_enabled=True,
+    in_memory_fallback_enabled=True,
 )

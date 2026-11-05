@@ -112,6 +112,7 @@ def _safe_filename(raw: str) -> str:
         413: _error("Arquivo acima do limite de upload", "Arquivo excede o limite de 100 MB"),
         500: _error("Falha ao registrar o job no banco", "Falha ao registrar job"),
         502: _error("Falha ao salvar o arquivo no storage", "Falha ao salvar arquivo no storage"),
+        503: _error("Fila de processamento indisponivel", "Fila de processamento indisponivel"),
     },
 )
 @limiter.limit(get_settings().rate_limit_create_job)
@@ -201,7 +202,25 @@ def create_job(
             "Falha ao registrar job",
         ) from exc
 
-    celery_app.send_task("app.workers.tasks.process_job", args=[str(job.id)])
+    try:
+        # Ninguem le o resultado da task, e sem ignore_result o Celery assina o
+        # result backend antes de publicar: com o Redis fora, a requisicao trava.
+        celery_app.send_task(
+            "app.workers.tasks.process_job",
+            args=[str(job.id)],
+            ignore_result=True,
+        )
+    except Exception as exc:
+        db.delete(job)
+        db.commit()
+        try:
+            delete_object(settings.minio_bucket_input, input_key)
+        except Exception:
+            pass
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Fila de processamento indisponivel",
+        ) from exc
     JOBS_CREATED.labels(operation=operation.value).inc()
 
     return JobCreateResponse(
@@ -346,8 +365,6 @@ def _content_disposition(filename: str) -> str:
         502: _error("Falha ao ler o resultado no storage", "Falha ao ler arquivo no storage"),
     },
 )
-
-
 @limiter.limit(get_settings().rate_limit_get_job)
 def download_job_output(
         request: Request,

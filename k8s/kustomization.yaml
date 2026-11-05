@@ -15,6 +15,7 @@ resources:
   - api.yaml
   - frontend.yaml
   - worker.yaml
+  - beat.yaml
   - prometheus.yaml
   - grafana.yaml
 

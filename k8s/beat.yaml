@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: beat
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: beat
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: beat
+    spec:
+      containers:
+        - name: beat
+          image: conversorarquivos-worker:latest
+          imagePullPolicy: Never
+          command:
+            - celery
+            - -A
+            - app.broker.celery_app
+            - beat
+            - --loglevel=info
+            - --schedule=/tmp/celerybeat-schedule
+          envFrom:
+            - configMapRef:
+                name: conversor-config
+            - secretRef:
+                name: conversor-secrets
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 384Mi

@@ -48,6 +48,21 @@ services:
     networks:
       - conversor-net
 
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: conversor-beat
+    command: celery -A app.broker.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    env_file: .env
+    depends_on:
+      redis:
+        condition: service_started
+    volumes:
+      - ./app:/code/app
+    networks:
+      - conversor-net
+
   postgres:
     image: postgres:16-alpine
     container_name: conversor-postgres

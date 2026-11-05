@@ -31,6 +31,9 @@ class Settings(BaseSettings):
 
     metrics_port: int = 9100
 
+    job_pending_timeout_seconds: int = 900
+    job_processing_timeout_seconds: int = 720  # Precisa ser maior que o task_time_limit do Celery.
+
     api_keys: str = ""
 
     @property
