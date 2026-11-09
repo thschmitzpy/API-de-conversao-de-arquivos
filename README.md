@@ -92,7 +92,7 @@ cp .env.example .env         # ajuste segredos se quiser
 docker compose up -d --build
 ```
 
-Isso sobe 8 containers: `frontend`, `api`, `worker`, `postgres`, `redis`, `minio`, `prometheus` e `grafana`. A API aplica as migrations Alembic no startup.
+Isso sobe 9 containers: `frontend`, `api`, `worker`, `beat`, `postgres`, `redis`, `minio`, `prometheus` e `grafana`. A API aplica as migrations Alembic no startup.
 
 Endpoints disponíveis:
 
@@ -133,7 +133,7 @@ O nó do kind tem um containerd próprio e não enxerga as imagens do Docker loc
 
 ```powershell
 ./k8s/load-images.ps1
-kubectl -n conversor rollout restart deploy/api deploy/worker deploy/frontend
+kubectl -n conversor rollout restart deploy/api deploy/worker deploy/beat deploy/frontend
 ```
 
 Frontend (8081), MinIO (9000/9001), Grafana (3000) e Prometheus (9090) ficam nas mesmas portas do compose. A API e o Postgres ficam só dentro do cluster, então o acesso direto é por port-forward:
@@ -148,6 +148,7 @@ kubectl -n conversor port-forward svc/postgres 5434:5432
 | `frontend` | Deployment (2 réplicas) + LoadBalancer 8081 | nginx serve o build e faz proxy de `/api` com allowlist de rotas; `externalTrafficPolicy: Local` preserva o IP do cliente |
 | `api` | Deployment (1 réplica) + Service ClusterIP | initContainer roda `alembic upgrade head`; startup/liveness em `/health`, readiness em `/ready` |
 | `worker` | Deployment (2 réplicas) + Service headless | `terminationGracePeriodSeconds: 120` para terminar o job em andamento antes de sair |
+| `beat` | Deployment (1 réplica, `strategy: Recreate`) | Celery beat com a imagem do worker; agenda o reaper de jobs presos a cada minuto. `Recreate` evita dois agendadores vivos durante o rollout |
 | `postgres` | StatefulSet + PVC 1Gi | Service ClusterIP |
 | `minio` | StatefulSet + PVC 5Gi + LoadBalancer 9000/9001 | mesmo `MINIO_PUBLIC_ENDPOINT=localhost:9000` do compose |
 | `redis` | Deployment | sem persistência — broker, result backend e storage do rate limit |
@@ -180,7 +181,7 @@ Resposta (`202 Accepted`):
 ```json
 {
   "id": "9a7b1c2d-3e4f-5061-7283-94a5b6c7d8e9",
-  "status": "pending",
+  "status": "PENDING",
   "status_url": "http://localhost:8000/jobs/9a7b1c2d-3e4f-5061-7283-94a5b6c7d8e9"
 }
 ```
@@ -196,7 +197,7 @@ Resposta (job concluído):
 ```json
 {
   "id": "9a7b1c2d-...",
-  "status": "completed",
+  "status": "DONE",
   "operation": "image.thumbnail",
   "input_filename": "foto.jpg",
   "output_url": "http://localhost:9000/outputs/9a7b.../output.webp?X-Amz-Signature=...",
@@ -209,7 +210,7 @@ Resposta (job concluído):
 ### 3. Listar jobs com filtros
 
 ```bash
-curl "http://localhost:8000/jobs?status=completed&operation=image.thumbnail&limit=10&offset=0"
+curl "http://localhost:8000/jobs?status=DONE&operation=image.thumbnail&limit=10&offset=0"
 ```
 
 Resposta:
@@ -238,6 +239,8 @@ Por padrão (configurável no `.env`):
 
 Quando excedido, a API responde `429 Too Many Requests`.
 
+Os contadores ficam no Redis. Se ele cair, o limiter passa a contar em memória no próprio processo da API em vez de derrubar as requisições com erro.
+
 ---
 
 ## Observabilidade
@@ -260,7 +263,7 @@ Métricas de negócio (em `app/metrics.py`, compartilhadas entre API e worker):
 | Métrica | Labels | Descrição |
 |---|---|---|
 | `jobs_created_total` | `operation` | Jobs criados por tipo de operação |
-| `jobs_finished_total` | `operation`, `status` | Jobs finalizados (`done` / `failed` / `unsupported`) |
+| `jobs_finished_total` | `operation`, `status` | Jobs finalizados (`done` / `failed` / `unsupported` / `reaped`) |
 | `job_processing_seconds` | `operation` | Histograma do tempo de processamento (0.1s → 300s) |
 
 Além dessas, o instrumentator exporta `http_requests_total` e `http_request_duration_seconds_bucket` — excluindo `/metrics`, `/health` e `/ready` do próprio tráfego medido.
@@ -314,7 +317,7 @@ docker compose run --rm --no-deps --entrypoint="" worker pytest \
 
 > No PowerShell, use `--entrypoint=""` com o sinal de igual — sem ele o PS descarta a string vazia.
 
-Cobertura atual: **250+ testes** em 19 suites — processors (unit), webhook (com e sem retry), rate limit e integração end-to-end (POST → worker → GET → MinIO).
+Cobertura atual: **250+ testes** em 23 suites — processors (unit), webhook (com e sem retry), rate limit, reaper de jobs presos e integração end-to-end (POST → worker → GET → MinIO).
 
 Frontend (Node 22):
 
@@ -364,7 +367,7 @@ app/
 ├── rate_limit.py     Limiter slowapi
 └── schemas.py        Pydantic DTOs
 frontend/             React (CRA) + nginx com proxy para a API
-k8s/                  Manifests Kustomize (frontend, api, worker, postgres, redis, minio, prometheus, grafana)
+k8s/                  Manifests Kustomize (frontend, api, worker, beat, postgres, redis, minio, prometheus, grafana)
 ├── monitoring/       Configs do Prometheus/Grafana para o cluster
 └── load-images.ps1   Build + import das imagens no nó do kind
 migrations/           Alembic
@@ -396,6 +399,8 @@ tests/
 - **Migration em initContainer** no Kubernetes — o Alembic roda antes do container da API subir, e a API fica com 1 réplica porque duas migrations concorrentes no mesmo banco disputariam o lock da `alembic_version`.
 - **Métricas do worker em modo multiprocess** — com o pool prefork do Celery, as tasks rodam nos processos filhos, mas o HTTP server de métricas fica no pai. Com `PROMETHEUS_MULTIPROC_DIR`, cada filho grava as métricas em arquivo e o `MultiProcessCollector` soma tudo no scrape. Sem isso, `jobs_finished_total` e `job_processing_seconds` nunca apareciam.
 - **Prometheus com `dns_sd_configs` no Service headless do worker** — cada réplica vira um target próprio. Um target estático `worker:9100` cairia em um pod aleatório a cada scrape.
+- **Reaper de jobs presos** — se um worker morre no meio de um job, ou a mensagem se perde na fila, o job ficaria em `PENDING`/`PROCESSING` para sempre. Uma task periódica do Celery beat (a cada minuto) marca como `FAILED` os jobs parados há mais de 15 min em `PENDING` ou 12 min em `PROCESSING`, com uma mensagem pedindo novo envio, e dispara o webhook se houver `callback_url`. O limite de `PROCESSING` fica acima do `task_time_limit` de 10 min do Celery, para nunca encerrar um job que ainda está dentro do tempo. O worker só assume um job com um `UPDATE ... WHERE status = 'PENDING'` atômico: se o reaper chegou antes, a task desiste em vez de processar um job já encerrado. Na métrica, esses casos aparecem como `status="reaped"`. O frontend tem uma rede de segurança própria e para de consultar depois de 30 min.
+- **Falha rápida com a fila fora do ar** — o `POST /jobs` publica a task com `ignore_result=True`. Sem isso, o Celery tenta se inscrever no result backend antes de publicar e, com o Redis fora, a requisição ficava travada por mais de 50 s. Agora a API responde `503` na hora e desfaz a linha no banco e o arquivo no MinIO, sem deixar órfãos.
 
 ---
 
