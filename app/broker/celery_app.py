@@ -33,6 +33,11 @@ celery_app.conf.update(
             "schedule": 60.0,
             "options": {"expires": 60},
         },
+        "purge-expired-files": {
+            "task": "app.workers.tasks.purge_expired_files",
+            "schedule": 900.0,
+            "options": {"expires": 900},
+        },
     },
 )
 

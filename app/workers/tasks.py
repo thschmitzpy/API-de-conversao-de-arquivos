@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from celery.utils.log import get_task_logger
-from sqlalchemy import and_, or_, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.broker.celery_app import celery_app
@@ -16,6 +16,7 @@ from app.models import Job, JobStatus
 from app.operations import Operation
 from app.schemas import WebhookPayload
 from app.storage.minio_client import (
+    delete_object,
     download_bytes,
     presigned_get_url,
     upload_stream,
@@ -52,6 +53,8 @@ _PROCESSORS: dict[str, Processor] = {
 
 
 REAPED_ERROR_MESSAGE = "O processamento foi interrompido. Envie o arquivo novamente."
+
+PURGE_BATCH_SIZE = 200
 
 
 @celery_app.task(name="app.workers.tasks.process_job")
@@ -182,6 +185,46 @@ def reap_stuck_jobs() -> int:
                 _deliver_webhook(db, job, settings)
 
     return len(reaped)
+
+
+@celery_app.task(name="app.workers.tasks.purge_expired_files")
+def purge_expired_files() -> int:
+    settings = get_settings()
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=settings.file_retention_hours)
+
+    with SessionLocal() as db:
+        # finished_at so e preenchido em DONE e FAILED (inclusive pelo reaper).
+        expired = db.scalars(
+            select(Job)
+            .where(Job.finished_at < cutoff, Job.files_purged_at.is_(None))
+            .order_by(Job.finished_at)
+            .limit(PURGE_BATCH_SIZE)
+        ).all()
+
+        purged = 0
+        for job in expired:
+            try:
+                delete_object(settings.minio_bucket_input, job.input_key)
+                if job.output_key:
+                    delete_object(settings.minio_bucket_output, job.output_key)
+            except Exception:
+
+                logger.exception(
+                    "Falha ao remover arquivos expirados",
+                    extra={"job_id": str(job.id), "operation": job.operation},
+                )
+                break
+
+            job.files_purged_at = now
+            db.commit()
+            purged += 1
+            logger.info(
+                "Arquivos expirados removidos",
+                extra={"job_id": str(job.id), "operation": job.operation},
+            )
+
+    return purged
 
 
 def _deliver_webhook(db: Session, job: Job, settings: Settings) -> None:

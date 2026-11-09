@@ -29,6 +29,8 @@ _JOB_STATUS_EXAMPLE: dict[str, Any] = {
     "updated_at": "2026-10-19T14:32:07.512000Z",
     "started_at": "2026-10-19T14:32:05.380000Z",
     "finished_at": "2026-10-19T14:32:07.512000Z",
+    "expires_at": "2026-10-20T14:32:07.512000Z",
+    "files_purged_at": None,
 }
 
 _JOB_SUMMARY_EXAMPLE: dict[str, Any] = {
@@ -96,6 +98,15 @@ class JobStatusResponse(BaseModel):
     updated_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    expires_at: datetime | None = Field(
+        default=None,
+        description="Quando entrada e resultado saem do storage (finished_at + retencao). "
+                    "Nulo enquanto o job nao termina.",
+    )
+    files_purged_at: datetime | None = Field(
+        default=None,
+        description="Quando os arquivos foram removidos. Depois disso o download responde 410.",
+    )
 
 
 class JobSummary(BaseModel):

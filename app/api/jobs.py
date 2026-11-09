@@ -1,6 +1,7 @@
 import io
 import json
 import uuid
+from datetime import timedelta
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Annotated, Any
 from urllib.parse import quote
@@ -320,9 +321,12 @@ def get_job(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Job nao encontrado")
 
     response = JobStatusResponse.model_validate(job)
+    settings = get_settings()
 
-    if job.output_key:
-        settings = get_settings()
+    if job.finished_at:
+        response.expires_at = job.finished_at + timedelta(hours=settings.file_retention_hours)
+
+    if job.output_key and job.files_purged_at is None:
         response.output_url = presigned_get_url(
             bucket=settings.minio_bucket_output,
             key=job.output_key,
@@ -358,6 +362,10 @@ def _content_disposition(filename: str) -> str:
             "content": {"application/octet-stream": {}},
         },
         404: _error("Job nao encontrado", "Job nao encontrado"),
+        410: _error(
+            "Resultado removido apos o prazo de retencao",
+            "Resultado expirado e removido do storage",
+        ),
         409: _error(
             "Job sem resultado disponivel (status diferente de DONE)",
             "Job sem resultado para download (status: PROCESSING)",
@@ -375,6 +383,12 @@ def download_job_output(
     job = db.get(Job, job_id)
     if job is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Job nao encontrado")
+
+    if job.files_purged_at is not None:
+        raise HTTPException(
+            status.HTTP_410_GONE,
+            "Resultado expirado e removido do storage",
+        )
 
     if job.status != JobStatus.DONE or not job.output_key:
         raise HTTPException(
