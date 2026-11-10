@@ -407,6 +407,11 @@ body {
   font-weight: 600;
 }
 
+.andamento__validade {
+  color: var(--texto-suave);
+  font-size: 0.9rem;
+}
+
 .alerta {
   margin: 0;
   padding: 12px 16px;

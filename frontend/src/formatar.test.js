@@ -1,4 +1,4 @@
-import { formatarBytes, formatarDuracao } from './formatar';
+import { formatarBytes, formatarDuracao, formatarExpiracao } from './formatar';
 
 test.each([
   [512, '512 B'],
@@ -18,4 +18,14 @@ test('formatarDuracao cobre subsegundo, segundos e minutos', () => {
 test('formatarDuracao devolve null para datas invalidas ou invertidas', () => {
   expect(formatarDuracao('lixo', '2026-10-29T12:00:00Z')).toBeNull();
   expect(formatarDuracao('2026-10-29T12:00:05Z', '2026-10-29T12:00:00Z')).toBeNull();
+});
+
+test('formatarExpiracao mostra data e hora locais', () => {
+  const iso = new Date(2026, 10, 10, 14, 5).toISOString();
+  expect(formatarExpiracao(iso)).toBe('10/11/2026 às 14:05');
+});
+
+test('formatarExpiracao devolve null para valor ausente ou invalido', () => {
+  expect(formatarExpiracao(null)).toBeNull();
+  expect(formatarExpiracao('lixo')).toBeNull();
 });

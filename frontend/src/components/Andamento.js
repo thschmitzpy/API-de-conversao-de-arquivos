@@ -1,5 +1,6 @@
+import { useEffect, useState } from 'react';
 import useJobPolling from '../hooks/useJobPolling';
-import { formatarDuracao } from '../formatar';
+import { formatarDuracao, formatarExpiracao } from '../formatar';
 import { urlDownload } from '../services/api';
 
 const ETAPAS = ['Envio', 'Na fila', 'Processando', 'Pronto'];
@@ -44,6 +45,25 @@ export default function Andamento({
   const emAndamento = !falha && !concluido;
   const etapa = etapaAtual(jobId, job);
   const duracao = concluido ? formatarDuracao(job.created_at, job.finished_at) : null;
+  const expiraEm = concluido ? job.expires_at : null;
+  const [prazoVencido, setPrazoVencido] = useState(false);
+
+  useEffect(() => {
+    setPrazoVencido(false);
+    if (!expiraEm) {
+      return undefined;
+    }
+    const restante = new Date(expiraEm).getTime() - Date.now();
+    if (restante <= 0) {
+      setPrazoVencido(true);
+      return undefined;
+    }
+    const timer = setTimeout(() => setPrazoVencido(true), restante);
+    return () => clearTimeout(timer);
+  }, [expiraEm]);
+
+  const expirou = prazoVencido || Boolean(job?.files_purged_at);
+  const validade = formatarExpiracao(expiraEm);
 
   return (
     <section className="painel andamento" aria-live="polite">
@@ -94,9 +114,20 @@ export default function Andamento({
       {concluido && (
         <div className="andamento__resultado">
           <p>{duracao ? `Pronto em ${duracao}.` : 'Pronto!'}</p>
-          <a className="botao botao--primario" href={urlDownload(jobId)} download>
-            Baixar resultado
-          </a>
+          {expirou ? (
+            <div className="andamento__validade">
+              O resultado expirou e foi removido. Envie o arquivo de novo para converter.
+            </div>
+          ) : (
+            <>
+              <a className="botao botao--primario" href={urlDownload(jobId)} download>
+                Baixar resultado
+              </a>
+              {validade && (
+                <div className="andamento__validade">Disponível para download até {validade}.</div>
+              )}
+            </>
+          )}
         </div>
       )}
 

@@ -79,6 +79,8 @@ Fluxo:
 
 Limite de upload: **100 MB** por job.
 
+Retenção: o arquivo enviado e o resultado ficam no MinIO por **24 h** após o fim do job (`FILE_RETENTION_HOURS`). O `GET /jobs/{id}` informa o prazo em `expires_at`; depois da limpeza, a resposta deixa de trazer `output_url`, o download responde `410 Gone` e o frontend troca o botão por um aviso.
+
 Uma `operation` fora da lista é rejeitada com `422 Unprocessable Entity` antes de qualquer upload ou gravação no banco; a resposta lista as operações aceitas. A lista vem do enum `Operation` (`app/operations.py`), compartilhado entre API e worker — um teste unitário garante que todo valor do enum tem processor registrado e vice-versa. No Swagger (`/docs`), o campo `operation` aparece como dropdown.
 
 ---
@@ -148,7 +150,7 @@ kubectl -n conversor port-forward svc/postgres 5434:5432
 | `frontend` | Deployment (2 réplicas) + LoadBalancer 8081 | nginx serve o build e faz proxy de `/api` com allowlist de rotas; `externalTrafficPolicy: Local` preserva o IP do cliente |
 | `api` | Deployment (1 réplica) + Service ClusterIP | initContainer roda `alembic upgrade head`; startup/liveness em `/health`, readiness em `/ready` |
 | `worker` | Deployment (2 réplicas) + Service headless | `terminationGracePeriodSeconds: 120` para terminar o job em andamento antes de sair |
-| `beat` | Deployment (1 réplica, `strategy: Recreate`) | Celery beat com a imagem do worker; agenda o reaper de jobs presos a cada minuto. `Recreate` evita dois agendadores vivos durante o rollout |
+| `beat` | Deployment (1 réplica, `strategy: Recreate`) | Celery beat com a imagem do worker; agenda o reaper de jobs presos a cada minuto e a limpeza de arquivos expirados a cada 15 min. `Recreate` evita dois agendadores vivos durante o rollout |
 | `postgres` | StatefulSet + PVC 1Gi | Service ClusterIP |
 | `minio` | StatefulSet + PVC 5Gi + LoadBalancer 9000/9001 | mesmo `MINIO_PUBLIC_ENDPOINT=localhost:9000` do compose |
 | `redis` | Deployment | sem persistência — broker, result backend e storage do rate limit |
@@ -203,7 +205,9 @@ Resposta (job concluído):
   "output_url": "http://localhost:9000/outputs/9a7b.../output.webp?X-Amz-Signature=...",
   "result_metadata": {"width": 300, "height": 300, "format": "WEBP"},
   "created_at": "2026-10-01T18:00:00Z",
-  "finished_at": "2026-10-01T18:00:02Z"
+  "finished_at": "2026-10-01T18:00:02Z",
+  "expires_at": "2026-10-02T18:00:02Z",
+  "files_purged_at": null
 }
 ```
 
@@ -317,7 +321,7 @@ docker compose run --rm --no-deps --entrypoint="" worker pytest \
 
 > No PowerShell, use `--entrypoint=""` com o sinal de igual — sem ele o PS descarta a string vazia.
 
-Cobertura atual: **250+ testes** em 23 suites — processors (unit), webhook (com e sem retry), rate limit, reaper de jobs presos e integração end-to-end (POST → worker → GET → MinIO).
+Cobertura atual: **250+ testes** em 24 suites — processors (unit), webhook (com e sem retry), rate limit, reaper de jobs presos, retenção de arquivos e integração end-to-end (POST → worker → GET → MinIO).
 
 Frontend (Node 22):
 
@@ -401,6 +405,7 @@ tests/
 - **Prometheus com `dns_sd_configs` no Service headless do worker** — cada réplica vira um target próprio. Um target estático `worker:9100` cairia em um pod aleatório a cada scrape.
 - **Reaper de jobs presos** — se um worker morre no meio de um job, ou a mensagem se perde na fila, o job ficaria em `PENDING`/`PROCESSING` para sempre. Uma task periódica do Celery beat (a cada minuto) marca como `FAILED` os jobs parados há mais de 15 min em `PENDING` ou 12 min em `PROCESSING`, com uma mensagem pedindo novo envio, e dispara o webhook se houver `callback_url`. O limite de `PROCESSING` fica acima do `task_time_limit` de 10 min do Celery, para nunca encerrar um job que ainda está dentro do tempo. O worker só assume um job com um `UPDATE ... WHERE status = 'PENDING'` atômico: se o reaper chegou antes, a task desiste em vez de processar um job já encerrado. Na métrica, esses casos aparecem como `status="reaped"`. O frontend tem uma rede de segurança própria e para de consultar depois de 30 min.
 - **Falha rápida com a fila fora do ar** — o `POST /jobs` publica a task com `ignore_result=True`. Sem isso, o Celery tenta se inscrever no result backend antes de publicar e, com o Redis fora, a requisição ficava travada por mais de 50 s. Agora a API responde `503` na hora e desfaz a linha no banco e o arquivo no MinIO, sem deixar órfãos.
+- **Retenção de 24 h com limpeza periódica** — sem prazo, o MinIO cresceria para sempre com arquivos que ninguém vai baixar de novo. A cada 15 min, uma task do beat pega até 200 jobs finalizados há mais de 24 h e apaga a entrada e o resultado; só depois disso marca `files_purged_at`. Se o MinIO cair no meio, o lote para e esses jobs voltam na rodada seguinte, então nenhum fica marcado com o arquivo ainda lá. Um índice parcial (`WHERE files_purged_at IS NULL`) mantém a busca barata mesmo com o histórico crescendo. A linha do job continua no banco: o histórico e as métricas não se perdem, só os arquivos.
 
 ---
 
