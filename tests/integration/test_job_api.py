@@ -184,6 +184,12 @@ def test_post_jobs_callback_interno_rejeita_antes_do_upload(client, monkeypatch)
         "app.api.jobs.celery_app.send_task",
         lambda *a, **kw: calls.append(a),
     )
+    # No CI os servicos ficam em localhost e "minio" nao resolve; fixa o IP
+    # privado que o nome teria na rede do compose.
+    monkeypatch.setattr(
+        "app.webhook.url_guard.socket.getaddrinfo",
+        lambda *a, **kw: [(2, 1, 6, "", ("172.18.0.3", 9000))],
+    )
 
     response = client.post(
         "/jobs",
