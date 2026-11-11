@@ -232,6 +232,8 @@ Resposta:
 
 Passe `-F "callback_url=https://seu-endpoint/..."` no `POST /jobs`. Ao finalizar, o worker envia `POST` no endpoint com o payload JSON do resultado, assinado no header `X-Conversor-Signature` (`sha256=<hmac hex>`) usando HMAC-SHA256 sobre o corpo bruto e o segredo `WEBHOOK_SIGNING_SECRET` do `.env`. Respostas 5xx, timeout e erros de rede disparam retry exponencial via tenacity; 4xx é tratado como falha definitiva. O formato completo do payload, com exemplos, está na seção **Webhooks** do `/docs`.
 
+O `callback_url` precisa usar `http` ou `https`, não pode ter credenciais na URL e tem limite de 2048 caracteres. O host é resolvido no `POST /jobs` e todos os IPs retornados precisam ser públicos: `localhost`, faixas privadas, link-local (inclusive `169.254.169.254`, o metadata de nuvem) e nomes internos como `minio` ou `postgres` levam `400` antes do upload. O worker repete a checagem logo antes de enviar, porque o DNS pode mudar entre a criação do job e o disparo. Para testar com um receptor local, use `WEBHOOK_ALLOW_PRIVATE_TARGETS=true` no `.env`. O padrão é `false`.
+
 ---
 
 ## Rate limiting
@@ -395,6 +397,7 @@ tests/
 - **Chave da API só no nginx** — o navegador nunca recebe a `X-API-Key`; o nginx a injeta nas chamadas para `/api`. Como quem passa pelo proxy já sai autenticado, ele libera só as rotas que a tela usa, e a listagem de jobs fica de fora.
 - **`X-Forwarded-For` sobrescrito na borda** — o nginx grava o IP real do cliente em vez de anexar, e no cluster a API fica em ClusterIP. Assim um cabeçalho forjado não burla o rate limit.
 - **Webhook com HMAC-SHA256** — o cliente consegue validar criptograficamente que o payload veio deste serviço.
+- **`callback_url` só para endereços públicos** — o webhook é um `POST` que parte de dentro da rede dos containers, e o nginx do frontend repassa o `callback_url` já com a chave injetada. Sem essa trava, qualquer visitante da tela usaria o worker para alcançar o MinIO, o Postgres ou o metadata da nuvem (SSRF). A validação resolve o DNS e exige `is_global` em todos os IPs, inclusive IPv4 mapeado em IPv6. Ela roda duas vezes, no `POST /jobs` e de novo no worker antes do envio.
 - **Dois endpoints MinIO** (`MINIO_ENDPOINT` interno para API/worker; `MINIO_PUBLIC_ENDPOINT` para o host da URL presigned) — resolve o problema clássico de assinatura S3 em ambiente Docker, onde o nome do serviço interno não resolve do browser.
 - **SQLAlchemy síncrono** — o Celery worker é síncrono e manter o mesmo paradigma na API elimina complexidade de bridges async/sync.
 - **Detecção de formato por conteúdo** em `ocr.extract` e `document.convert` — magic bytes e estrutura interna (streams OLE2, diretórios OOXML, `mimetype` ODF) em vez de confiar na extensão ou no `content_type` do upload.

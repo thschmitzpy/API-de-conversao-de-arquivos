@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -54,6 +55,12 @@ _PROCESSORS: dict[str, Processor] = {
 
 
 REAPED_ERROR_MESSAGE = "O processamento foi interrompido. Envie o arquivo novamente."
+
+GENERIC_ERROR_MESSAGE = "Nao foi possivel processar o arquivo. Tente novamente mais tarde."
+
+MAX_ERROR_MESSAGE_LENGTH = 300
+
+_ABSOLUTE_PATH = re.compile(r"(?<![\w/])/[\w.-]+(?:/[\w.-]+)+")
 
 PURGE_BATCH_SIZE = 200
 
@@ -133,7 +140,7 @@ def process_job(job_id: str) -> None:
                 job = db.get(Job, job_uuid)
                 if job is not None:
                     job.status = JobStatus.FAILED
-                    job.error_message = f"{type(exc).__name__}: {exc}"
+                    job.error_message = _public_error_message(exc)
                     job.finished_at = datetime.now(timezone.utc)
                     db.commit()
                 logger.exception(
@@ -226,6 +233,20 @@ def purge_expired_files() -> int:
             )
 
     return purged
+
+
+def _public_error_message(exc: Exception) -> str:
+    # ValueError e o contrato dos processors para entrada ou parametro invalido.
+    # Qualquer outra excecao (storage, banco, bug) vira mensagem generica;
+    # o detalhe fica so no log.
+    if not isinstance(exc, ValueError):
+        return GENERIC_ERROR_MESSAGE
+    message = _ABSOLUTE_PATH.sub("<arquivo>", str(exc)).strip()
+    if not message:
+        return GENERIC_ERROR_MESSAGE
+    if len(message) > MAX_ERROR_MESSAGE_LENGTH:
+        message = message[: MAX_ERROR_MESSAGE_LENGTH - 3] + "..."
+    return message
 
 
 def _deliver_webhook(db: Session, job: Job, settings: Settings) -> None:
