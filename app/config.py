@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     webhook_signing_secret: str
     webhook_max_retries: int = 5
     webhook_timeout_seconds: int = 10
+    webhook_allow_private_targets: bool = False
 
     rate_limit_enabled: bool = True
     rate_limit_storage_url: str = "memory://"

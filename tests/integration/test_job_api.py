@@ -123,7 +123,7 @@ def test_processa_image_thumbnail_end_to_end(client):
         if body["status"] in ("DONE", "FAILED"):
             final = body
             break
-        time.sleep(0.3)
+        time.sleep(1)
 
     assert final is not None, "job nao completou em 20s (worker rodando?)"
     assert final["status"] == "DONE", f"job falhou: {final}"
@@ -176,3 +176,34 @@ def test_list_jobs_filtro_operation_invalida_retorna_422(client):
     response = client.get("/jobs", params={"operation": "nao.existe"})
 
     assert response.status_code == 422
+
+
+def test_post_jobs_callback_interno_rejeita_antes_do_upload(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "app.api.jobs.celery_app.send_task",
+        lambda *a, **kw: calls.append(a),
+    )
+
+    response = client.post(
+        "/jobs",
+        files={"file": ("test.png", make_png_bytes(), "image/png")},
+        data={
+            "operation": "image.thumbnail",
+            "callback_url": "http://minio:9000/",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "interno ou reservado" in response.json()["detail"]
+
+    with SessionLocal() as db:
+        assert db.query(Job).count() == 0
+
+    settings = get_settings()
+    objects = list(
+        get_client().list_objects(settings.minio_bucket_input, recursive=True)
+    )
+    assert objects == []
+
+    assert calls == []

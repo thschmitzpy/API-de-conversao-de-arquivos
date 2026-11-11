@@ -43,6 +43,7 @@ from app.storage.minio_client import (
     presigned_get_url,
     upload_stream,
 )
+from app.webhook.url_guard import UnsafeCallbackUrl, validate_callback_url
 
 
 def _error(description: str, example: str) -> dict[str, Any]:
@@ -158,6 +159,16 @@ def create_job(
     params_dict = _parse_parameters(parameters)
 
     settings = get_settings()
+    callback_url = callback_url or None
+    if callback_url:
+        try:
+            validate_callback_url(
+                callback_url,
+                allow_private=settings.webhook_allow_private_targets,
+            )
+        except UnsafeCallbackUrl as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
     job_id = uuid.uuid4()
     input_key = f"{job_id}/{filename}"
     content_type = file.content_type or "application/octet-stream"

@@ -22,6 +22,7 @@ from app.storage.minio_client import (
     upload_stream,
 )
 from app.webhook import notifier
+from app.webhook.url_guard import UnsafeCallbackUrl, validate_callback_url
 from app.workers.processors import (
     audio_extract,
     csv_validate,
@@ -228,6 +229,18 @@ def purge_expired_files() -> int:
 
 
 def _deliver_webhook(db: Session, job: Job, settings: Settings) -> None:
+    try:
+        validate_callback_url(
+            job.callback_url,
+            allow_private=settings.webhook_allow_private_targets,
+        )
+    except UnsafeCallbackUrl as exc:
+        logger.warning(
+            "Webhook bloqueado",
+            extra={"job_id": str(job.id), "reason": str(exc)},
+        )
+        return
+
     output_url: str | None = None
     if job.output_key:
         output_url = presigned_get_url(
