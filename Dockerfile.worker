@@ -29,4 +29,13 @@ RUN poetry install --no-interaction --no-ansi --no-root
 
 COPY ./app /code/app
 
+# Codigo continua do root (so leitura para o processo); /code fica do app
+# apenas para caches de ferramentas como o .pytest_cache. O home existe
+# porque o LibreOffice grava configuracao em $HOME.
+RUN useradd --create-home --uid 10001 --user-group app \
+    && chown app:app /code
+
+# UID numerico: o runAsNonRoot do Kubernetes so consegue verificar numero.
+USER 10001
+
 CMD ["celery", "-A", "app.broker.celery_app", "worker", "--loglevel=info", "--concurrency=2"]

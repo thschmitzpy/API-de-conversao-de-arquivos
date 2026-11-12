@@ -2,7 +2,7 @@
 # Só variáveis de ambiente definidas são trocadas; as do nginx ($host, $uri...) ficam intactas.
 
 server {
-    listen 80;
+    listen 8080;
     server_name _;
 
     root /usr/share/nginx/html;

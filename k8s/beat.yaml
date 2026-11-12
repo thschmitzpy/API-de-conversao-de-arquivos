@@ -14,10 +14,18 @@ spec:
       labels:
         app.kubernetes.io/name: beat
     spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: beat
           image: conversorarquivos-worker:latest
           imagePullPolicy: Never
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           command:
             - celery
             - -A

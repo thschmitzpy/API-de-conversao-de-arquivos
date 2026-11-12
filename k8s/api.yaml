@@ -25,10 +25,18 @@ spec:
       labels:
         app.kubernetes.io/name: api
     spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       initContainers:
         - name: migrate
           image: conversorarquivos-api:latest
           imagePullPolicy: Never
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           command: ["alembic", "upgrade", "head"]
           envFrom:
             - configMapRef:
@@ -39,6 +47,10 @@ spec:
         - name: api
           image: conversorarquivos-api:latest
           imagePullPolicy: Never
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
             - name: http
               containerPort: 8000

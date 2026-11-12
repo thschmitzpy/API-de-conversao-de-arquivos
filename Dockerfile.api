@@ -22,6 +22,14 @@ COPY alembic.ini /code/alembic.ini
 COPY ./migrations /code/migrations
 COPY ./app /code/app
 
+# Codigo continua do root (so leitura para o processo); /code fica do app
+# apenas para caches de ferramentas como o .pytest_cache.
+RUN useradd --create-home --uid 10001 --user-group app \
+    && chown app:app /code
+
+# UID numerico: o runAsNonRoot do Kubernetes so consegue verificar numero.
+USER 10001
+
 EXPOSE 8000
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]

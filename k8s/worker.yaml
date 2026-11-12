@@ -26,10 +26,18 @@ spec:
         app.kubernetes.io/name: worker
     spec:
       terminationGracePeriodSeconds: 120
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: worker
           image: conversorarquivos-worker:latest
           imagePullPolicy: Never
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
             - name: metrics
               containerPort: 9100

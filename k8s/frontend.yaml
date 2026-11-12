@@ -28,13 +28,21 @@ spec:
       labels:
         app.kubernetes.io/name: frontend
     spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: frontend
           image: conversorarquivos-frontend:latest
           imagePullPolicy: Never
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
             - name: http
-              containerPort: 80
+              containerPort: 8080
           env:
             - name: CONVERSOR_API_KEY
               valueFrom:
