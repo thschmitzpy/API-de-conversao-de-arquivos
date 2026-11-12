@@ -339,7 +339,7 @@ npm test
 
 O workflow `.github/workflows/ci.yml` roda a cada push e pull request na branch `main`, com quatro jobs:
 
-- **`lint`** — Ruff check sobre todo o código.
+- **`lint`** — confere se o `poetry.lock` está em dia com o `pyproject.toml` (`poetry check --lock`) e roda o Ruff sobre todo o código.
 - **`test`** — sobe Postgres, Redis e MinIO via `docker compose`, instala Python 3.13 + Poetry e os binários de sistema dos processors (FFmpeg, Tesseract com `eng`/`por` e LibreOffice headless) no runner, aplica migrations Alembic, inicia o worker Celery em background e executa toda a suite `pytest`.
 - **`k8s`** — renderiza os manifests com `kubectl kustomize k8s` e valida o resultado com [kubeconform](https://github.com/yannh/kubeconform) em modo `-strict` (campo desconhecido ou com tipo errado reprova o build). Antes disso, compara os arquivos do Grafana em `monitoring/` com as cópias em `k8s/monitoring/`.
 - **`frontend`** — roda os testes com Jest, builda a imagem de produção e valida a config do nginx com `nginx -t`.
@@ -411,6 +411,7 @@ tests/
 - **Retenção de 24 h com limpeza periódica** — sem prazo, o MinIO cresceria para sempre com arquivos que ninguém vai baixar de novo. A cada 15 min, uma task do beat pega até 200 jobs finalizados há mais de 24 h e apaga a entrada e o resultado; só depois disso marca `files_purged_at`. Se o MinIO cair no meio, o lote para e esses jobs voltam na rodada seguinte, então nenhum fica marcado com o arquivo ainda lá. Um índice parcial (`WHERE files_purged_at IS NULL`) mantém a busca barata mesmo com o histórico crescendo. A linha do job continua no banco: o histórico e as métricas não se perdem, só os arquivos.
 - **Mensagem de erro sem detalhe interno** — o `error_message` vai para o frontend e para o webhook, então só passam as mensagens que os processors escrevem para erro de entrada ou de parâmetro (`ValueError`), com caminhos absolutos trocados por `<arquivo>` e corte em 300 caracteres. Falhas de storage, de banco ou bugs viram uma mensagem genérica, e o traceback completo fica só no log JSON, junto do `job_id`.
 - **Containers sem root** — API, worker e beat rodam com o UID 10001, e o frontend usa a variante `nginx-unprivileged` (UID 101, porta 8080). O código em `/code` continua do root, então o processo não consegue alterá-lo. No Kubernetes, `runAsNonRoot`, `allowPrivilegeEscalation: false` e `drop: ["ALL"]` fazem o cluster recusar o pod se a imagem voltar a rodar como root.
+- **`poetry.lock` versionado** — as imagens da API e do worker e o CI instalam exatamente as mesmas versões. Sem o lock, cada build resolvia os `^` do `pyproject.toml` na hora, e duas imagens buildadas em dias diferentes podiam divergir sem nenhuma mudança no código. O `COPY` dos Dockerfiles exige o arquivo, e o job `lint` reprova o push se o `pyproject.toml` mudar sem o lock acompanhar. Atualizar dependência vira um diff revisável.
 
 ---
 
