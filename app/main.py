@@ -10,6 +10,7 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 from app.api.health import router as health_router
 from app.api.jobs import router as jobs_router
 from app.config import get_settings
+from app.forwarded_prefix import ForwardedPrefixMiddleware
 from app.logging_setup import configure_logging
 from app.rate_limit import limiter
 from app.storage.minio_client import ensure_buckets
@@ -100,6 +101,7 @@ def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> Response:
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 app.add_middleware(SlowAPIMiddleware)
+app.add_middleware(ForwardedPrefixMiddleware)
 
 Instrumentator(
     excluded_handlers=["/metrics", "/health", "/ready"],

@@ -213,3 +213,21 @@ def test_post_jobs_callback_interno_rejeita_antes_do_upload(client, monkeypatch)
     assert objects == []
 
     assert calls == []
+
+
+def test_post_jobs_atras_do_proxy_devolve_status_url_publica(client, monkeypatch):
+    monkeypatch.setattr("app.api.jobs.celery_app.send_task", lambda *a, **kw: None)
+
+    response = client.post(
+        "/jobs",
+        files={"file": ("test.png", make_png_bytes(), "image/png")},
+        data={
+            "operation": "image.thumbnail",
+            "parameters": json.dumps({"width": 50}),
+        },
+        headers={"Host": "localhost:8081", "X-Forwarded-Prefix": "/api"},
+    )
+
+    assert response.status_code == 202
+    body = response.json()
+    assert body["status_url"] == f"http://localhost:8081/api/jobs/{body['id']}"

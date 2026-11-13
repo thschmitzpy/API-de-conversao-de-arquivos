@@ -22,6 +22,11 @@ server {
     # forjado pelo cliente não chega ao rate limit da API.
     proxy_set_header X-Forwarded-For $remote_addr;
     proxy_set_header X-Forwarded-Proto $scheme;
+    # Host público e prefixo removido no rewrite: sem eles, as URLs que a API
+    # devolve (status_url) apontariam para http://api:8000, que só existe na
+    # rede dos containers.
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Forwarded-Prefix /api;
     # Upload e download em streaming, sem copiar o arquivo inteiro para disco.
     proxy_request_buffering off;
     proxy_buffering off;
