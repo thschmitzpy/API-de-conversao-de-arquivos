@@ -119,12 +119,11 @@ docker compose down -v         # também apaga os volumes
 
 ## Kubernetes
 
-O mesmo stack roda num cluster Kubernetes local, descrito com Kustomize em `k8s/`. O alvo é o Kubernetes embutido no Docker Desktop (modo **kind**, v1.34): os Services `LoadBalancer` respondem em `localhost`, então as URLs são as mesmas do compose.
+O mesmo stack roda num cluster Kubernetes local, descrito com Kustomize em `k8s/`. O alvo é o Kubernetes embutido no Docker Desktop (modo **kind**, v1.34): os Services `LoadBalancer` respondem em `localhost`, em portas próprias do cluster para conviver com o compose.
 
 Pré-requisitos: Docker Desktop com Kubernetes habilitado (Settings → Kubernetes → kind) e `kubectl` apontando para o contexto dele.
 
 ```powershell
-docker compose stop                                   # o cluster usa as mesmas portas
 Copy-Item k8s/secrets.env.example k8s/secrets.env     # segredos locais, fora do git
 ./k8s/load-images.ps1                                 # builda api/worker/frontend e importa no nó do kind
 kubectl apply -k k8s
@@ -138,7 +137,7 @@ O nó do kind tem um containerd próprio e não enxerga as imagens do Docker loc
 kubectl -n conversor rollout restart deploy/api deploy/worker deploy/beat deploy/frontend
 ```
 
-Frontend (8081), MinIO (9000/9001), Grafana (3000) e Prometheus (9090) ficam nas mesmas portas do compose. A API e o Postgres ficam só dentro do cluster, então o acesso direto é por port-forward:
+O cluster publica em portas próprias, com um `1` na frente das do compose: Frontend (http://localhost:18081), MinIO (19000/19001), Grafana (http://localhost:13000) e Prometheus (http://localhost:19090). Assim os dois ambientes ficam de pé juntos, sem disputa de porta. A API e o Postgres ficam só dentro do cluster, então o acesso direto é por port-forward:
 
 ```powershell
 kubectl -n conversor port-forward svc/api 8000:8000
@@ -147,15 +146,15 @@ kubectl -n conversor port-forward svc/postgres 5434:5432
 
 | Componente | Recursos | Detalhes |
 |---|---|---|
-| `frontend` | Deployment (2 réplicas) + LoadBalancer 8081 | nginx serve o build e faz proxy de `/api` com allowlist de rotas; `externalTrafficPolicy: Local` preserva o IP do cliente |
+| `frontend` | Deployment (2 réplicas) + LoadBalancer 18081 | nginx serve o build e faz proxy de `/api` com allowlist de rotas; `externalTrafficPolicy: Local` preserva o IP do cliente |
 | `api` | Deployment (1 réplica) + Service ClusterIP | initContainer roda `alembic upgrade head`; startup/liveness em `/health`, readiness em `/ready` |
 | `worker` | Deployment (2 réplicas) + Service headless | `terminationGracePeriodSeconds: 120` para terminar o job em andamento antes de sair |
 | `beat` | Deployment (1 réplica, `strategy: Recreate`) | Celery beat com a imagem do worker; agenda o reaper de jobs presos a cada minuto e a limpeza de arquivos expirados a cada 15 min. `Recreate` evita dois agendadores vivos durante o rollout |
 | `postgres` | StatefulSet + PVC 1Gi | Service ClusterIP |
-| `minio` | StatefulSet + PVC 5Gi + LoadBalancer 9000/9001 | mesmo `MINIO_PUBLIC_ENDPOINT=localhost:9000` do compose |
+| `minio` | StatefulSet + PVC 5Gi + Service ClusterIP 9000/9001 + `minio-public` LoadBalancer 19000/19001 | `MINIO_PUBLIC_ENDPOINT=localhost:19000` assina os links de download com a porta pública do cluster; a API e o worker seguem em `minio:9000` |
 | `redis` | Deployment | sem persistência — broker, result backend e storage do rate limit |
-| `prometheus` | StatefulSet + PVC 2Gi + LoadBalancer 9090 | descobre cada pod do worker via DNS do Service headless |
-| `grafana` | Deployment + LoadBalancer 3000 | sem PVC — datasource e dashboard vêm de ConfigMaps |
+| `prometheus` | StatefulSet + PVC 2Gi + Service ClusterIP 9090 + `prometheus-public` LoadBalancer 19090 | descobre cada pod do worker via DNS do Service headless; o Grafana consulta `prometheus:9090` |
+| `grafana` | Deployment + LoadBalancer 13000 | sem PVC — datasource e dashboard vêm de ConfigMaps |
 
 A config não sensível vem de um `configMapGenerator` e os segredos de um `secretGenerator` lido de `k8s/secrets.env`. O sufixo de hash que o Kustomize põe nos nomes faz os pods serem recriados sozinhos quando a config muda.
 
@@ -287,7 +286,7 @@ Prometheus (http://localhost:9090) retém 7 dias no volume `conversor-prometheus
 
 ### Logs estruturados JSON
 
-Toda saída de log — API, worker, Uvicorn e Celery — é renderizada em JSON single-line, pronta para Loki, Elastic ou Datadog. Cada linha carrega `timestamp` (ISO 8601 com timezone), `level`, `logger`, `message` e campos estruturados injetados via `extra={...}`.
+Toda saída de log — API, worker, Uvicorn e Celery — é renderizada em JSON single-line, pronta para Loki, Elastic ou Datadog. Cada linha carrega `timestamp` (ISO 8601 em UTC, ex.: `2026-11-16T14:03:21.512Z`), `level`, `logger`, `message` e campos estruturados injetados via `extra={...}`.
 
 Os call sites de processamento injetam `job_id` e `operation` como campos top-level — você filtra `job_id="abc-123"` direto no backend de logs em vez de regex em texto livre:
 
@@ -404,6 +403,7 @@ tests/
 - **LibreOffice com perfil isolado por job** (`-env:UserInstallation` em diretório temporário) — com `--concurrency=2`, duas instâncias no perfil padrão se bloqueiam e a segunda sai sem converter. O `soffice` roda em sessão própria para que o timeout mate o grupo inteiro de processos, sem deixar `soffice.bin` órfão.
 - **Enum Postgres explícito** para `job_status` — criado na migration, mais confiável do que depender da criação automática pelo SQLAlchemy.
 - **Migration em initContainer** no Kubernetes — o Alembic roda antes do container da API subir, e a API fica com 1 réplica porque duas migrations concorrentes no mesmo banco disputariam o lock da `alembic_version`.
+- **Portas do cluster separadas das do compose** — o cluster publica em 18081/19000/13000/19090. Quando os dois disputavam as mesmas portas do host, o container do compose que perdia a porta ficava `Up` mas sem rede, e só voltava com `--force-recreate`. MinIO e Prometheus ganharam um Service `-public` à parte para que o tráfego interno continue em `minio:9000` e `prometheus:9090`.
 - **Métricas do worker em modo multiprocess** — com o pool prefork do Celery, as tasks rodam nos processos filhos, mas o HTTP server de métricas fica no pai. Com `PROMETHEUS_MULTIPROC_DIR`, cada filho grava as métricas em arquivo e o `MultiProcessCollector` soma tudo no scrape. Sem isso, `jobs_finished_total` e `job_processing_seconds` nunca apareciam.
 - **Prometheus com `dns_sd_configs` no Service headless do worker** — cada réplica vira um target próprio. Um target estático `worker:9100` cairia em um pod aleatório a cada scrape.
 - **Reaper de jobs presos** — se um worker morre no meio de um job, ou a mensagem se perde na fila, o job ficaria em `PENDING`/`PROCESSING` para sempre. Uma task periódica do Celery beat (a cada minuto) marca como `FAILED` os jobs parados há mais de 15 min em `PENDING` ou 12 min em `PROCESSING`, com uma mensagem pedindo novo envio, e dispara o webhook se houver `callback_url`. O limite de `PROCESSING` fica acima do `task_time_limit` de 10 min do Celery, para nunca encerrar um job que ainda está dentro do tempo. O worker só assume um job com um `UPDATE ... WHERE status = 'PENDING'` atômico: se o reaper chegou antes, a task desiste em vez de processar um job já encerrado. Na métrica, esses casos aparecem como `status="reaped"`. O frontend tem uma rede de segurança própria e para de consultar depois de 30 min.

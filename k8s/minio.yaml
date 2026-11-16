@@ -3,7 +3,6 @@ kind: Service
 metadata:
   name: minio
 spec:
-  type: LoadBalancer
   selector:
     app.kubernetes.io/name: minio
   ports:
@@ -12,6 +11,24 @@ spec:
       targetPort: api
     - name: console
       port: 9001
+      targetPort: console
+---
+# Exposicao no host em porta propria, separada do Service interno: a API e o worker
+# seguem em minio:9000 e o compose pode usar a 9000 do host ao mesmo tempo.
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-public
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: minio
+  ports:
+    - name: api
+      port: 19000
+      targetPort: api
+    - name: console
+      port: 19001
       targetPort: console
 ---
 apiVersion: apps/v1
