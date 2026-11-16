@@ -3,8 +3,6 @@ import re
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-# Um ou mais segmentos simples ("/api", "/v1/api"). Barra no fim, "//host" ou
-# qualquer outro caractere fazem o header ser ignorado.
 _PREFIX_RE = re.compile(r"(/[A-Za-z0-9_-]+)+")
 
 

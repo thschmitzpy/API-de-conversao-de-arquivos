@@ -14,12 +14,21 @@ server {
     # Mesmo teto do POST /jobs (100 MB) com folga para o envelope multipart.
     client_max_body_size 105m;
 
+    # Proxy confiável na frente (Caddy, balanceador da nuvem): só conexões vindas
+    # de TRUSTED_PROXY_CIDR têm o X-Forwarded-For lido, e aí $remote_addr passa a
+    # ser o IP do cliente. O padrão 127.0.0.1/32 desliga na prática: sem proxy na
+    # frente, nenhuma conexão chega desse endereço e o cabeçalho é ignorado.
+    set_real_ip_from ${TRUSTED_PROXY_CIDR};
+    real_ip_header X-Forwarded-For;
+    real_ip_recursive on;
+
     # Herdado pelas locations de /api. A chave existe só aqui no servidor,
     # nunca no bundle do navegador.
     proxy_http_version 1.1;
     proxy_set_header X-API-Key "${CONVERSOR_API_KEY}";
-    # Sobrescreve em vez de anexar: o nginx é a borda, então um X-Forwarded-For
-    # forjado pelo cliente não chega ao rate limit da API.
+    # Sobrescreve em vez de anexar: um X-Forwarded-For forjado pelo cliente não
+    # chega ao rate limit da API. Com o realip acima, $remote_addr já é o IP do
+    # cliente mesmo atrás de um proxy confiável.
     proxy_set_header X-Forwarded-For $remote_addr;
     proxy_set_header X-Forwarded-Proto $scheme;
     # Host público e prefixo removido no rewrite: sem eles, as URLs que a API
