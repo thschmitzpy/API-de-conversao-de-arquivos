@@ -77,7 +77,7 @@ Fluxo:
 | `ocr.extract` | PDF ou imagem (PNG/JPEG/WEBP/GIF) | TXT ou JSON | `lang` (`eng`, `por`, `por+eng`, …), `output_format` (`text` ou `json`), `dpi` (72-600, só para PDF) |
 | `document.convert` | DOCX / DOC / ODT / RTF / XLSX / XLS / ODS / PPTX / PPT / ODP | PDF | — (formato detectado pelo conteúdo, não pela extensão) |
 
-Limite de upload: **100 MB** por job.
+Limite de upload: **100 MB** por job (`MAX_UPLOAD_MB`). A API, o nginx do front e a tela leem a mesma variável; o front busca o valor em `/config.json`, que o nginx gera no boot, então mudar o limite não exige rebuild.
 
 Retenção: o arquivo enviado e o resultado ficam no MinIO por **24 h** após o fim do job (`FILE_RETENTION_HOURS`). O `GET /jobs/{id}` informa o prazo em `expires_at`; depois da limpeza, a resposta deixa de trazer `output_url`, o download responde `410 Gone` e o frontend troca o botão por um aviso.
 
@@ -400,7 +400,7 @@ tests/
 - **Dois endpoints MinIO** (`MINIO_ENDPOINT` interno para API/worker; `MINIO_PUBLIC_ENDPOINT` para o host da URL presigned) — resolve o problema clássico de assinatura S3 em ambiente Docker, onde o nome do serviço interno não resolve do browser.
 - **SQLAlchemy síncrono** — o Celery worker é síncrono e manter o mesmo paradigma na API elimina complexidade de bridges async/sync.
 - **Detecção de formato por conteúdo** em `ocr.extract` e `document.convert` — magic bytes e estrutura interna (streams OLE2, diretórios OOXML, `mimetype` ODF) em vez de confiar na extensão ou no `content_type` do upload.
-- **LibreOffice com perfil isolado por job** (`-env:UserInstallation` em diretório temporário) — com `--concurrency=2`, duas instâncias no perfil padrão se bloqueiam e a segunda sai sem converter. O `soffice` roda em sessão própria para que o timeout mate o grupo inteiro de processos, sem deixar `soffice.bin` órfão.
+- **LibreOffice com perfil isolado por job** (`-env:UserInstallation` em diretório temporário) — com mais de uma conversão simultânea por worker (`CELERY_CONCURRENCY`, padrão 2), duas instâncias no perfil padrão se bloqueiam e a segunda sai sem converter. O `soffice` roda em sessão própria para que o timeout mate o grupo inteiro de processos, sem deixar `soffice.bin` órfão.
 - **Enum Postgres explícito** para `job_status` — criado na migration, mais confiável do que depender da criação automática pelo SQLAlchemy.
 - **Migration em initContainer** no Kubernetes — o Alembic roda antes do container da API subir, e a API fica com 1 réplica porque duas migrations concorrentes no mesmo banco disputariam o lock da `alembic_version`.
 - **Portas do cluster separadas das do compose** — o cluster publica em 18081/19000/13000/19090. Quando os dois disputavam as mesmas portas do host, o container do compose que perdia a porta ficava `Up` mas sem rede, e só voltava com `--force-recreate`. MinIO e Prometheus ganharam um Service `-public` à parte para que o tráfego interno continue em `minio:9000` e `prometheus:9090`.

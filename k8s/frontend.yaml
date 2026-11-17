@@ -49,6 +49,11 @@ spec:
                 secretKeyRef:
                   name: conversor-secrets
                   key: FRONTEND_API_KEY
+            - name: MAX_UPLOAD_MB
+              valueFrom:
+                configMapKeyRef:
+                  name: conversor-config
+                  key: MAX_UPLOAD_MB
           readinessProbe:
             httpGet:
               path: /

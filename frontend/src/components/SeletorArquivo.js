@@ -4,7 +4,7 @@ import { formatarBytes } from '../formatar';
 
 const ACCEPT = EXTENSOES_SUPORTADAS.map((ext) => `.${ext}`).join(',');
 
-export default function SeletorArquivo({ arquivo, onSelecionar }) {
+export default function SeletorArquivo({ arquivo, limiteBytes, onSelecionar }) {
   const inputRef = useRef(null);
   const [arrastando, setArrastando] = useState(false);
 
@@ -78,7 +78,7 @@ export default function SeletorArquivo({ arquivo, onSelecionar }) {
           <span className="seletor__icone" aria-hidden="true">⇪</span>
           <strong>Arraste um arquivo aqui</strong>
           <span>ou clique para escolher no computador</span>
-          <small>Até 100 MB · imagens, PDF, Office, vídeo, áudio e ZIP de PDFs</small>
+          <small>Até {formatarBytes(limiteBytes)} · imagens, PDF, Office, vídeo, áudio e ZIP de PDFs</small>
         </button>
       )}
     </section>

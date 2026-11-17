@@ -1,0 +1,4 @@
+# Scripts executados dentro de containers Linux: com CRLF o shell lê o \r
+# como parte do valor.
+*.sh    text eol=lf
+*.envsh text eol=lf

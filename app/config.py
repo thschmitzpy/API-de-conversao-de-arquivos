@@ -37,6 +37,9 @@ class Settings(BaseSettings):
 
     file_retention_hours: int = 24
 
+    max_upload_mb: int = 100
+    celery_concurrency: int = 2
+
     api_keys: str = ""
 
     @property

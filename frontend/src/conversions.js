@@ -1,6 +1,7 @@
 // Mapa extensão -> conversões oferecidas na interface. Cada opção monta os
 // `parameters` aceitos pelo processor correspondente no worker.
 
+// Padrão até o /config.json responder; o valor real vem do nginx.
 export const LIMITE_UPLOAD_BYTES = 100 * 1024 * 1024;
 
 // O thumbnail do Pillow nunca amplia a imagem: com um teto alto, a operação

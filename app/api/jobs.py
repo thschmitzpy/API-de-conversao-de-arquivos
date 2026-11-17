@@ -68,8 +68,6 @@ router = APIRouter(
     },
 )
 
-MAX_UPLOAD_BYTES = 100 * 1024 * 1024
-
 
 def _parse_parameters(raw: str | None) -> dict[str, Any]:
     if not raw:
@@ -149,11 +147,11 @@ def create_job(
 
     if size == 0:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Arquivo vazio")
-    if size > MAX_UPLOAD_BYTES:
-        limit_mb = MAX_UPLOAD_BYTES // (1024 * 1024)
+    max_upload_mb = get_settings().max_upload_mb
+    if size > max_upload_mb * 1024 * 1024:
         raise HTTPException(
             status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            f"Arquivo excede o limite de {limit_mb} MB",
+            f"Arquivo excede o limite de {max_upload_mb} MB",
         )
 
     params_dict = _parse_parameters(parameters)

@@ -231,3 +231,32 @@ def test_post_jobs_atras_do_proxy_devolve_status_url_publica(client, monkeypatch
     assert response.status_code == 202
     body = response.json()
     assert body["status_url"] == f"http://localhost:8081/api/jobs/{body['id']}"
+
+
+def test_post_jobs_acima_do_limite_rejeita_antes_do_upload(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "app.api.jobs.celery_app.send_task",
+        lambda *a, **kw: calls.append(a),
+    )
+    monkeypatch.setattr(get_settings(), "max_upload_mb", 1)
+
+    response = client.post(
+        "/jobs",
+        files={"file": ("grande.png", b"\0" * (1024 * 1024 + 1), "image/png")},
+        data={"operation": "image.thumbnail"},
+    )
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == "Arquivo excede o limite de 1 MB"
+
+    with SessionLocal() as db:
+        assert db.query(Job).count() == 0
+
+    settings = get_settings()
+    objects = list(
+        get_client().list_objects(settings.minio_bucket_input, recursive=True)
+    )
+    assert objects == []
+
+    assert calls == []

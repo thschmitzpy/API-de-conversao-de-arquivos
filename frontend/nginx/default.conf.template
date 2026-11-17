@@ -11,8 +11,9 @@ server {
     gzip on;
     gzip_types text/css application/javascript application/json image/svg+xml;
 
-    # Mesmo teto do POST /jobs (100 MB) com folga para o envelope multipart.
-    client_max_body_size 105m;
+    # Teto do POST /jobs (MAX_UPLOAD_MB) com folga para o envelope multipart;
+    # a conta é feita em 10-limites.envsh.
+    client_max_body_size ${NGINX_MAX_BODY_MB}m;
 
     # Proxy confiável na frente (Caddy, balanceador da nuvem): só conexões vindas
     # de TRUSTED_PROXY_CIDR têm o X-Forwarded-For lido, e aí $remote_addr passa a
@@ -62,6 +63,14 @@ server {
 
     location /api/ {
         return 404;
+    }
+
+    # Limites que o front lê ao carregar, vindos das mesmas variáveis da API.
+    # Mudar o limite não exige rebuild da imagem.
+    location = /config.json {
+        default_type application/json;
+        add_header Cache-Control "no-cache";
+        return 200 '{"maxUploadMb": ${MAX_UPLOAD_MB}}';
     }
 
     # Arquivos do build têm hash no nome: cache longo é seguro.

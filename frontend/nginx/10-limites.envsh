@@ -1,0 +1,6 @@
+#!/bin/sh
+# Executado pelo entrypoint da imagem antes do envsubst dos templates. Por ser
+# .envsh, roda no mesmo shell, e o export chega ao default.conf.template.
+# Folga de 5 MB para o envelope multipart: um arquivo no limite exato ainda
+# chega à API, que responde o 413 em JSON em vez da página HTML do nginx.
+export NGINX_MAX_BODY_MB=$((MAX_UPLOAD_MB + 5))

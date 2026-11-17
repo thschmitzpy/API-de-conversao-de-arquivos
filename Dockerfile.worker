@@ -40,4 +40,4 @@ RUN useradd --create-home --uid 10001 --user-group app \
 # UID numerico: o runAsNonRoot do Kubernetes so consegue verificar numero.
 USER 10001
 
-CMD ["celery", "-A", "app.broker.celery_app", "worker", "--loglevel=info", "--concurrency=2"]
+CMD ["celery", "-A", "app.broker.celery_app", "worker", "--loglevel=info"]

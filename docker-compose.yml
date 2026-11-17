@@ -150,6 +150,7 @@ services:
     environment:
       CONVERSOR_API_KEY: ${FRONTEND_API_KEY:?defina FRONTEND_API_KEY no .env}
       TRUSTED_PROXY_CIDR: ${TRUSTED_PROXY_CIDR:-127.0.0.1/32}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-100}
     ports:
       - "8081:8080"
     depends_on:

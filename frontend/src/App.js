@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import './App.css';
 import Andamento from './components/Andamento';
 import OpcoesConversao from './components/OpcoesConversao';
@@ -6,15 +6,25 @@ import SeletorArquivo from './components/SeletorArquivo';
 import { LIMITE_UPLOAD_BYTES, extensaoDe, opcoesPara } from './conversions';
 import { formatarBytes } from './formatar';
 import { criarJob, mensagemDeErro } from './services/api';
+import { carregarLimiteUpload } from './services/config';
 
 export default function App() {
   const [arquivo, setArquivo] = useState(null);
   const [opcao, setOpcao] = useState(null);
   const [valores, setValores] = useState({});
   const [envio, setEnvio] = useState(null);
+  const [limiteBytes, setLimiteBytes] = useState(LIMITE_UPLOAD_BYTES);
+
+  useEffect(() => {
+    carregarLimiteUpload().then((bytes) => {
+      if (bytes) {
+        setLimiteBytes(bytes);
+      }
+    });
+  }, []);
 
   const opcoes = arquivo ? opcoesPara(arquivo.name) : [];
-  const muitoGrande = Boolean(arquivo) && arquivo.size > LIMITE_UPLOAD_BYTES;
+  const muitoGrande = Boolean(arquivo) && arquivo.size > limiteBytes;
 
   function selecionarArquivo(novo) {
     const disponiveis = opcoesPara(novo.name);
@@ -65,12 +75,12 @@ export default function App() {
           />
         ) : (
           <>
-            <SeletorArquivo arquivo={arquivo} onSelecionar={selecionarArquivo} />
+            <SeletorArquivo arquivo={arquivo} limiteBytes={limiteBytes} onSelecionar={selecionarArquivo} />
 
             {muitoGrande && (
               <p className="alerta alerta--erro" role="alert">
                 O arquivo tem {formatarBytes(arquivo.size)}; o limite é{' '}
-                {formatarBytes(LIMITE_UPLOAD_BYTES)}.
+                {formatarBytes(limiteBytes)}.
               </p>
             )}
 

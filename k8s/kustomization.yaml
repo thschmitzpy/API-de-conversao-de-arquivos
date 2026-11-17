@@ -35,6 +35,8 @@ configMapGenerator:
       - WEBHOOK_MAX_RETRIES=5
       - WEBHOOK_TIMEOUT_SECONDS=10
       - FORWARDED_ALLOW_IPS=*
+      - MAX_UPLOAD_MB=100
+      - CELERY_CONCURRENCY=2
   - name: prometheus-config
     files:
       - monitoring/prometheus.yml
