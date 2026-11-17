@@ -21,6 +21,7 @@ _JOB_STATUS_EXAMPLE: dict[str, Any] = {
     "input_size_bytes": 482133,
     "output_key": f"{_JOB_ID_EXAMPLE}/output.webp",
     "output_content_type": "image/webp",
+    "download_url": f"http://localhost:8000/jobs/{_JOB_ID_EXAMPLE}/download",
     "output_url": f"http://localhost:9000/outputs/{_JOB_ID_EXAMPLE}/output.webp?X-Amz-Signature=...",
     "parameters": {"width": 256, "height": 256, "format": "webp"},
     "result_metadata": {"width": 256, "height": 171, "format": "WEBP", "size_bytes": 8412},
@@ -83,10 +84,15 @@ class JobStatusResponse(BaseModel):
 
     output_key: str | None = None
     output_content_type: str | None = None
+    download_url: str | None = Field(
+        default=None,
+        description="URL do GET /jobs/{id}/download, que transmite o resultado pela API. "
+                    "Presente quando status = DONE e os arquivos ainda nao expiraram.",
+    )
     output_url: str | None = Field(
         default=None,
-        description="Link presigned para download do resultado, valido por 1 hora. "
-                    "Presente apenas quando status = DONE.",
+        description="Link presigned direto do storage, valido por 1 hora. Presente apenas "
+                    "quando status = DONE e o servidor define MINIO_PUBLIC_ENDPOINT.",
     )
 
     parameters: dict[str, Any] = Field(default_factory=dict)

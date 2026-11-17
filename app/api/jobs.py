@@ -336,6 +336,9 @@ def get_job(
         response.expires_at = job.finished_at + timedelta(hours=settings.file_retention_hours)
 
     if job.output_key and job.files_purged_at is None:
+        response.download_url = str(
+            request.url_for("download_job_output", job_id=job.id)
+        )
         response.output_url = presigned_get_url(
             bucket=settings.minio_bucket_output,
             key=job.output_key,

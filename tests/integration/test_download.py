@@ -101,3 +101,41 @@ def test_download_exige_api_key(client):
     r = client.get(f"/jobs/{job_id}/download", headers={"X-API-Key": ""})
 
     assert r.status_code in (401, 403)
+
+
+def test_get_job_concluido_traz_download_url(client):
+    job_id = _criar_job(JobStatus.DONE, com_output=True)
+
+    body = client.get(f"/jobs/{job_id}").json()
+
+    assert body["download_url"] == f"http://testserver/jobs/{job_id}/download"
+
+
+def test_get_job_em_andamento_sem_download_url(client):
+    job_id = _criar_job(JobStatus.PROCESSING)
+
+    body = client.get(f"/jobs/{job_id}").json()
+
+    assert body["download_url"] is None
+    assert body["output_url"] is None
+
+
+def test_download_url_atras_do_proxy_usa_host_e_prefixo_publicos(client):
+    job_id = _criar_job(JobStatus.DONE, com_output=True)
+
+    body = client.get(
+        f"/jobs/{job_id}",
+        headers={"Host": "localhost:8081", "X-Forwarded-Prefix": "/api"},
+    ).json()
+
+    assert body["download_url"] == f"http://localhost:8081/api/jobs/{job_id}/download"
+
+
+def test_sem_endpoint_publico_omite_output_url(client, monkeypatch):
+    monkeypatch.setattr(get_settings(), "minio_public_endpoint", None)
+    job_id = _criar_job(JobStatus.DONE, com_output=True)
+
+    body = client.get(f"/jobs/{job_id}").json()
+
+    assert body["output_url"] is None
+    assert body["download_url"].endswith(f"/jobs/{job_id}/download")

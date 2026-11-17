@@ -32,7 +32,7 @@ API_DESCRIPTION = f"""
   2. O worker Celery processa o arquivo em background.
   3. Acompanhe o resultado de uma das formas:
      - **Polling** em `GET /jobs/{{id}}` ate o status virar `done` ou `failed`.
-       Quando `done`, `output_url` traz um link temporario para download.
+       Quando `done`, `download_url` aponta para `GET /jobs/{{id}}/download`.
      - **Webhook**: se `callback_url` foi informada, a API envia um `POST` com o
          resultado, assinado com HMAC-SHA256 no header `X-Conversor-Signature`.
          Payload, verificacao e regras de retry na secao **Webhooks** no fim da pagina.

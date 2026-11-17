@@ -113,6 +113,7 @@ def test_get_informa_expiracao_e_omite_link_apos_limpeza(client):
 
     body = client.get(f"/jobs/{recente}").json()
     assert body["output_url"] is not None
+    assert body["download_url"].endswith(f"/jobs/{recente}/download")
     assert body["files_purged_at"] is None
     assert datetime.fromisoformat(body["expires_at"]) == (
             datetime.fromisoformat(body["finished_at"]) + retention
@@ -120,6 +121,7 @@ def test_get_informa_expiracao_e_omite_link_apos_limpeza(client):
 
     body = client.get(f"/jobs/{expirado}").json()
     assert body["output_url"] is None
+    assert body["download_url"] is None
     assert body["files_purged_at"] is not None
 
 

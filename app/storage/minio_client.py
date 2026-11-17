@@ -26,9 +26,8 @@ def get_client() -> Minio:
 @lru_cache
 def get_public_client() -> Minio:
     settings = get_settings()
-    endpoint = settings.minio_public_endpoint or settings.minio_endpoint
     return Minio(
-        endpoint=endpoint,
+        endpoint=settings.minio_public_endpoint,
         access_key=settings.minio_access_key,
         secret_key=settings.minio_secret_key,
         secure=settings.minio_secure,
@@ -71,7 +70,9 @@ def download_bytes(bucket: str, key: str) -> io.BytesIO:
     return buffer
 
 
-def presigned_get_url(bucket: str, key: str, expires_seconds: int = 3600) -> str:
+def presigned_get_url(bucket: str, key: str, expires_seconds: int = 3600) -> str | None:
+    if not get_settings().minio_public_endpoint:
+        return None
     return get_public_client().presigned_get_object(
         bucket_name=bucket,
         object_name=key,
