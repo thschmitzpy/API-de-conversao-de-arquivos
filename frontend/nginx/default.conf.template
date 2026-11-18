@@ -1,6 +1,13 @@
 # A imagem oficial do nginx roda o envsubst neste template ao subir o container.
 # Só variáveis de ambiente definidas são trocadas; as do nginx ($host, $uri...) ficam intactas.
 
+# Atras do Caddy o nginx recebe HTTP puro; o esquema publico chega no cabecalho.
+# So "https" e aceito: um valor forjado afetaria apenas as URLs da propria resposta.
+map $http_x_forwarded_proto $esquema_publico {
+    default $scheme;
+    https   https;
+}
+
 server {
     listen 8080;
     server_name _;
@@ -31,7 +38,7 @@ server {
     # chega ao rate limit da API. Com o realip acima, $remote_addr já é o IP do
     # cliente mesmo atrás de um proxy confiável.
     proxy_set_header X-Forwarded-For $remote_addr;
-    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Proto $esquema_publico;
     # Host público e prefixo removido no rewrite: sem eles, as URLs que a API
     # devolve (status_url) apontariam para http://api:8000, que só existe na
     # rede dos containers.

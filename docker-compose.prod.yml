@@ -1,0 +1,191 @@
+# Deploy numa VM: Caddy na frente (HTTPS automatico + basic auth), resto sem
+# porta publicada. Subir com:
+#   docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+name: conversor-prod
+
+x-app: &app
+  env_file: .env.prod
+  restart: unless-stopped
+  networks:
+    - conversor-net
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?defina DOMAIN no .env.prod}
+      BASIC_AUTH_USER: ${BASIC_AUTH_USER:?defina BASIC_AUTH_USER no .env.prod}
+      BASIC_AUTH_HASH: ${BASIC_AUTH_HASH:?defina BASIC_AUTH_HASH no .env.prod}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - frontend
+      - grafana
+    networks:
+      - conversor-net
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    environment:
+      CONVERSOR_API_KEY: ${FRONTEND_API_KEY:?defina FRONTEND_API_KEY no .env.prod}
+      # So o Caddy alcanca o nginx (sem porta publicada), entao a rede inteira
+      # pode ser tratada como proxy confiavel.
+      TRUSTED_PROXY_CIDR: 172.30.0.0/24
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-100}
+    depends_on:
+      - api
+    networks:
+      - conversor-net
+
+  # Migration em container proprio, uma vez por deploy: api, worker e beat
+  # so sobem depois que ela termina com sucesso.
+  migrate:
+    <<: *app
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    command: alembic upgrade head
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    environment:
+      FORWARDED_ALLOW_IPS: "*"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+
+  worker:
+    <<: *app
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+
+  beat:
+    <<: *app
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    command: celery -A app.broker.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?defina POSTGRES_USER no .env.prod}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env.prod}
+      POSTGRES_DB: ${POSTGRES_DB:?defina POSTGRES_DB no .env.prod}
+    volumes:
+      - conversor-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - conversor-net
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks:
+      - conversor-net
+
+  minio:
+    image: chainguard/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?defina MINIO_ROOT_USER no .env.prod}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?defina MINIO_ROOT_PASSWORD no .env.prod}
+    volumes:
+      - conversor-minio:/data
+    networks:
+      - conversor-net
+
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - conversor-prometheus:/prometheus
+    depends_on:
+      - api
+      - worker
+    networks:
+      - conversor-net
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?defina GRAFANA_ADMIN_PASSWORD no .env.prod}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      # O Caddy repassa o Authorization do basic auth; com o basic auth do
+      # Grafana ligado, ele tentaria validar esse usuario e responderia 401.
+      GF_AUTH_BASIC_ENABLED: "false"
+      GF_SERVER_ROOT_URL: https://${DOMAIN}/grafana/
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_USERS_DEFAULT_THEME: light
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - conversor-grafana:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - conversor-net
+
+volumes:
+  caddy-data:
+  caddy-config:
+  conversor-pg:
+  conversor-minio:
+  conversor-prometheus:
+  conversor-grafana:
+
+networks:
+  conversor-net:
+    driver: bridge
+    # Faixa fixa para o TRUSTED_PROXY_CIDR do frontend. Se colidir com outra
+    # rede da VM, troque aqui e no frontend.
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
