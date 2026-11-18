@@ -21,7 +21,7 @@ Projeto de portfólio — foco em arquitetura clara, testes, empacotamento Docke
 | Rate limiting | slowapi |
 | Observabilidade | Prometheus + Grafana + logs estruturados JSON |
 | Testes | pytest (250+ casos, incluindo integração end-to-end) |
-| Deploy | Docker Compose · Kubernetes (Kustomize) |
+| Deploy | Docker Compose · Kubernetes (Kustomize) · VM com Caddy (HTTPS automático) |
 
 Python 3.13 · Poetry 1.8
 
@@ -43,7 +43,7 @@ Python 3.13 · Poetry 1.8
       │                      │  tabela jobs │
       │                      └──────────────┘
       │
-      │  GET /jobs/{id}  ──▶  API devolve status + presigned URL do MinIO
+      │  GET /jobs/{id}  ──▶  API devolve status + download_url (+ presigned URL, se o MinIO for público)
       │
       ▼
 ┌─────────────┐  ◀─── POST assinado HMAC-SHA256 (se callback_url informado)
@@ -58,7 +58,7 @@ Fluxo:
 3. Worker consome a fila, baixa o input, chama o processor correspondente e salva o output no MinIO.
 4. Worker atualiza o `Job` no Postgres (status, `output_key`, `result_metadata`, `finished_at`).
 5. Se o cliente informou `callback_url`, worker dispara webhook assinado com HMAC-SHA256 (retry exponencial).
-6. Cliente consulta `GET /jobs/{id}` e recebe URL presigned para baixar o output direto do storage. O frontend usa `GET /jobs/{id}/download`, que entrega o arquivo pela própria API.
+6. Cliente consulta `GET /jobs/{id}`. Com o job em `DONE`, a resposta traz `download_url`, que aponta para `GET /jobs/{id}/download` e entrega o arquivo pela própria API. Esse é o caminho que o frontend usa. Quando `MINIO_PUBLIC_ENDPOINT` está definido, a resposta também traz `output_url`, um link presigned para baixar direto do storage.
 
 ---
 
@@ -79,7 +79,7 @@ Fluxo:
 
 Limite de upload: **100 MB** por job (`MAX_UPLOAD_MB`). A API, o nginx do front e a tela leem a mesma variável; o front busca o valor em `/config.json`, que o nginx gera no boot, então mudar o limite não exige rebuild.
 
-Retenção: o arquivo enviado e o resultado ficam no MinIO por **24 h** após o fim do job (`FILE_RETENTION_HOURS`). O `GET /jobs/{id}` informa o prazo em `expires_at`; depois da limpeza, a resposta deixa de trazer `output_url`, o download responde `410 Gone` e o frontend troca o botão por um aviso.
+Retenção: o arquivo enviado e o resultado ficam no MinIO por **24 h** após o fim do job (`FILE_RETENTION_HOURS`). O `GET /jobs/{id}` informa o prazo em `expires_at`; depois da limpeza, a resposta deixa de trazer `download_url` e `output_url`, o download responde `410 Gone` e o frontend troca o botão por um aviso.
 
 Uma `operation` fora da lista é rejeitada com `422 Unprocessable Entity` antes de qualquer upload ou gravação no banco; a resposta lista as operações aceitas. A lista vem do enum `Operation` (`app/operations.py`), compartilhado entre API e worker — um teste unitário garante que todo valor do enum tem processor registrado e vice-versa. No Swagger (`/docs`), o campo `operation` aparece como dropdown.
 
@@ -166,6 +166,35 @@ kubectl delete -k k8s
 
 ---
 
+## Deploy numa VM
+
+Para uma demo pública, `docker-compose.prod.yml` sobe o mesmo stack numa VM única com o [Caddy](https://caddyserver.com) na frente. O Caddy emite e renova o certificado HTTPS sozinho e exige usuário e senha (basic auth) em todas as rotas.
+
+Pré-requisitos: VM com Docker + Compose v2 (4 GB de RAM bastam com `CELERY_CONCURRENCY=1`), um domínio com registro `A` apontando para o IP dela e as portas 80 e 443 liberadas no firewall. A 80 é usada pelo desafio do Let's Encrypt e pelo redirecionamento para HTTPS.
+
+```bash
+cp .env.prod.example .env.prod      # fora do git; troque todos os "troque-me"
+docker run --rm caddy:2-alpine caddy hash-password --plaintext 'sua-senha'
+# cole o hash em BASIC_AUTH_HASH entre aspas simples e defina DOMAIN
+docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+```
+
+O hash bcrypt tem `$` no meio. Sem as aspas simples, o compose tenta interpolar esses trechos como variáveis e o basic auth recusa qualquer senha.
+
+O que fica exposto:
+
+| Rota | Destino | Acesso |
+|---|---|---|
+| `https://<DOMAIN>/` | frontend (nginx) | basic auth |
+| `https://<DOMAIN>/api/...` | API, pela allowlist do nginx do front | basic auth + chave injetada pelo nginx |
+| `https://<DOMAIN>/grafana/` | Grafana | basic auth; anônimo como Viewer, `admin` com `GRAFANA_ADMIN_PASSWORD` |
+
+Só o Caddy publica portas. API (e o `/docs`), Postgres, Redis, MinIO e Prometheus ficam na rede interna do compose. Sem `MINIO_PUBLIC_ENDPOINT`, os downloads saem todos por `download_url`. As migrations rodam no serviço `migrate`, que executa uma vez por deploy; `api`, `worker` e `beat` só sobem depois que ele termina com sucesso. Para atualizar, basta `git pull` e o mesmo `up -d --build`.
+
+Para testar na própria máquina, use `DOMAIN=localhost`. O Caddy troca o Let's Encrypt por uma CA interna e o navegador avisa sobre o certificado, mas o fluxo é o mesmo. As portas 80 e 443 do host precisam estar livres.
+
+---
+
 ## Exemplos de uso
 
 ### 1. Criar um job de thumbnail
@@ -201,6 +230,7 @@ Resposta (job concluído):
   "status": "DONE",
   "operation": "image.thumbnail",
   "input_filename": "foto.jpg",
+  "download_url": "http://localhost:8000/jobs/9a7b1c2d-.../download",
   "output_url": "http://localhost:9000/outputs/9a7b.../output.webp?X-Amz-Signature=...",
   "result_metadata": {"width": 300, "height": 300, "format": "WEBP"},
   "created_at": "2026-10-01T18:00:00Z",
@@ -209,6 +239,8 @@ Resposta (job concluído):
   "files_purged_at": null
 }
 ```
+
+O `download_url` vem sempre que há resultado disponível. O `output_url` só aparece com `MINIO_PUBLIC_ENDPOINT` definido (no compose de dev ele é `localhost:9000`); sem ele, o campo vem `null`, inclusive no payload do webhook.
 
 ### 3. Listar jobs com filtros
 
@@ -336,12 +368,13 @@ npm test
 
 ## Integração contínua
 
-O workflow `.github/workflows/ci.yml` roda a cada push e pull request na branch `main`, com quatro jobs:
+O workflow `.github/workflows/ci.yml` roda a cada push e pull request na branch `main`, com cinco jobs:
 
 - **`lint`** — confere se o `poetry.lock` está em dia com o `pyproject.toml` (`poetry check --lock`) e roda o Ruff sobre todo o código.
 - **`test`** — sobe Postgres, Redis e MinIO via `docker compose`, instala Python 3.13 + Poetry e os binários de sistema dos processors (FFmpeg, Tesseract com `eng`/`por` e LibreOffice headless) no runner, aplica migrations Alembic, inicia o worker Celery em background e executa toda a suite `pytest` com cobertura (pytest-cov). A tabela de cobertura vai para o resumo do run, o relatório HTML fica como artefato `coverage-html`, e o job reprova se a cobertura ficar abaixo de 90%.
 - **`k8s`** — renderiza os manifests com `kubectl kustomize k8s` e valida o resultado com [kubeconform](https://github.com/yannh/kubeconform) em modo `-strict` (campo desconhecido ou com tipo errado reprova o build). Antes disso, compara os arquivos do Grafana em `monitoring/` com as cópias em `k8s/monitoring/`.
 - **`frontend`** — roda os testes com Jest, builda a imagem de produção e valida a config do nginx com `nginx -t`.
+- **`deploy`** — valida o `docker-compose.prod.yml` com `docker compose config -q`, usando o `.env.prod.example` como `.env.prod`, e o `deploy/Caddyfile` com `caddy validate`, usando um hash gerado na hora. Uma variável obrigatória esquecida no exemplo ou um erro de sintaxe no Caddyfile reprovam o push, em vez de aparecer só no deploy.
 
 As cópias existem porque o Kustomize não lê arquivos fora do diretório da kustomization. Sem a verificação, mexer no dashboard do compose e esquecer da cópia faria os dois ambientes divergirem sem nenhum erro aparente.
 
@@ -371,6 +404,7 @@ app/
 ├── operations.py     Enum Operation (fonte única das operações aceitas)
 ├── rate_limit.py     Limiter slowapi
 └── schemas.py        Pydantic DTOs
+deploy/               Caddyfile do compose de produção (docker-compose.prod.yml)
 frontend/             React (CRA) + nginx com proxy para a API
 k8s/                  Manifests Kustomize (frontend, api, worker, beat, postgres, redis, minio, prometheus, grafana)
 ├── monitoring/       Configs do Prometheus/Grafana para o cluster
@@ -392,12 +426,12 @@ tests/
 - **Celery + Redis** em vez de `BackgroundTasks` do FastAPI — jobs sobrevivem a restart da API e o worker escala horizontalmente de forma independente.
 - **MinIO** no lugar de S3 real — mesmo contrato S3, 100% offline, ideal para portfólio e desenvolvimento local.
 - **Postgres `jobs` como fonte da verdade** — status, parâmetros, metadados e resultado ficam no banco. O Celery só carrega o `job_id`, evitando payloads grandes na fila.
-- **Presigned URL** para clientes da API baixarem o output direto do storage, sem a API virar proxy de arquivo. O frontend é a exceção: baixa por `GET /jobs/{id}/download`, para não depender do MinIO exposto ao navegador.
+- **Download pela API, presigned URL opcional** — o `download_url` (`GET /jobs/{id}/download`) funciona em qualquer ambiente, porque só depende da API estar acessível. O `output_url` presigned deixa o cliente baixar direto do storage sem a API virar proxy de arquivo, mas exige o MinIO exposto. Por isso ele só é gerado quando `MINIO_PUBLIC_ENDPOINT` está definido. Em produção o MinIO fica fechado e tudo sai pela API.
 - **Chave da API só no nginx** — o navegador nunca recebe a `X-API-Key`; o nginx a injeta nas chamadas para `/api`. Como quem passa pelo proxy já sai autenticado, ele libera só as rotas que a tela usa, e a listagem de jobs fica de fora.
 - **`X-Forwarded-For` sobrescrito na borda** — o nginx grava o IP real do cliente em vez de anexar, e no cluster a API fica em ClusterIP. Assim um cabeçalho forjado não burla o rate limit. Atrás de um proxy (Caddy, balanceador da nuvem), o módulo `realip` lê o `X-Forwarded-For` apenas de conexões vindas de `TRUSTED_PROXY_CIDR`; o padrão `127.0.0.1/32` mantém o cabeçalho ignorado.
 - **Webhook com HMAC-SHA256** — o cliente consegue validar criptograficamente que o payload veio deste serviço.
 - **`callback_url` só para endereços públicos** — o webhook é um `POST` que parte de dentro da rede dos containers, e o nginx do frontend repassa o `callback_url` já com a chave injetada. Sem essa trava, qualquer visitante da tela usaria o worker para alcançar o MinIO, o Postgres ou o metadata da nuvem (SSRF). A validação resolve o DNS e exige `is_global` em todos os IPs, inclusive IPv4 mapeado em IPv6. Ela roda duas vezes, no `POST /jobs` e de novo no worker antes do envio.
-- **Dois endpoints MinIO** (`MINIO_ENDPOINT` interno para API/worker; `MINIO_PUBLIC_ENDPOINT` para o host da URL presigned) — resolve o problema clássico de assinatura S3 em ambiente Docker, onde o nome do serviço interno não resolve do browser.
+- **Dois endpoints MinIO** (`MINIO_ENDPOINT` interno para API/worker; `MINIO_PUBLIC_ENDPOINT` para o host da URL presigned) — resolve o problema clássico de assinatura S3 em ambiente Docker, onde o nome do serviço interno não resolve do browser. Deixar o público vazio desliga o `output_url` em vez de gerar um link que o cliente não conseguiria abrir.
 - **SQLAlchemy síncrono** — o Celery worker é síncrono e manter o mesmo paradigma na API elimina complexidade de bridges async/sync.
 - **Detecção de formato por conteúdo** em `ocr.extract` e `document.convert` — magic bytes e estrutura interna (streams OLE2, diretórios OOXML, `mimetype` ODF) em vez de confiar na extensão ou no `content_type` do upload.
 - **LibreOffice com perfil isolado por job** (`-env:UserInstallation` em diretório temporário) — com mais de uma conversão simultânea por worker (`CELERY_CONCURRENCY`, padrão 2), duas instâncias no perfil padrão se bloqueiam e a segunda sai sem converter. O `soffice` roda em sessão própria para que o timeout mate o grupo inteiro de processos, sem deixar `soffice.bin` órfão.
@@ -413,6 +447,7 @@ tests/
 - **Containers sem root** — API, worker e beat rodam com o UID 10001, e o frontend usa a variante `nginx-unprivileged` (UID 101, porta 8080). O código em `/code` continua do root, então o processo não consegue alterá-lo. No Kubernetes, `runAsNonRoot`, `allowPrivilegeEscalation: false` e `drop: ["ALL"]` fazem o cluster recusar o pod se a imagem voltar a rodar como root.
 - **`poetry.lock` versionado** — as imagens da API e do worker e o CI instalam exatamente as mesmas versões. Sem o lock, cada build resolvia os `^` do `pyproject.toml` na hora, e duas imagens buildadas em dias diferentes podiam divergir sem nenhuma mudança no código. O `COPY` dos Dockerfiles exige o arquivo, e o job `lint` reprova o push se o `pyproject.toml` mudar sem o lock acompanhar. Atualizar dependência vira um diff revisável.
 - **Cobertura com piso medido, não chutado** — o CI é o único lugar onde a suíte inteira roda num processo só, com todos os binários dos processors, então o número de referência vem de lá (92% com branch coverage, que conta os dois lados de cada `if`). O piso de 90% deixa folga para refactors e reprova código novo sem teste. O código executado pelo worker Celery em background não entra na medição, mas processors e tasks também são chamados direto pelos testes.
+- **Caddy na frente do compose de produção** — numa VM única, o Caddy resolve HTTPS (emissão e renovação automáticas) e basic auth com uma config de 25 linhas, sem certbot nem cron. O nginx do front continua responsável pela allowlist de rotas e pela chave da API, e passa a confiar no `X-Forwarded-For` só da rede interna do compose (`TRUSTED_PROXY_CIDR`). O HSTS ficou de fora de propósito: testando com `DOMAIN=localhost`, o navegador gravaria a regra para `localhost` e passaria a forçar HTTPS também no `localhost:8081` do ambiente de dev.
 
 ---
 

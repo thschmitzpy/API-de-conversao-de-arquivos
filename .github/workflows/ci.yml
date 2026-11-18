@@ -190,3 +190,23 @@ jobs:
       # O nginx resolve o upstream ao validar a config; o --add-host so satisfaz essa resolucao.
       - name: Validate nginx config
         run: docker run --rm --add-host api:127.0.0.1 -e CONVERSOR_API_KEY=ci conversor-frontend nginx -t
+
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+
+      - name: Validate production compose
+        run: |
+          cp .env.prod.example .env.prod
+          docker compose --env-file .env.prod -f docker-compose.prod.yml config -q
+
+
+      - name: Validate Caddyfile
+        run: |
+          hash=$(docker run --rm caddy:2-alpine caddy hash-password --plaintext ci)
+          docker run --rm \
+            -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            -e DOMAIN=localhost -e BASIC_AUTH_USER=ci -e BASIC_AUTH_HASH="$hash" \
+            caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
