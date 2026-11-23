@@ -9,7 +9,7 @@ import pytest
 from openpyxl import Workbook
 from pypdf import PdfReader
 
-from app.workers.processors import document_convert
+from app.workers.processors import base, document_convert
 from app.workers.processors.document_convert import _detect_format, convert
 
 requires_soffice = pytest.mark.skipif(
@@ -299,3 +299,9 @@ def test_conversoes_concorrentes_nao_conflitam():
 
     for text, result in zip(texts, results):
         assert text in _pdf_text(result.output)
+
+
+def test_zip_acima_do_limite_descompactado_raises(monkeypatch):
+    monkeypatch.setattr(base, "MAX_UNCOMPRESSED_BYTES", 100)
+    with pytest.raises(ValueError, match="excede o limite"):
+        _detect_format(_make_docx("X").getvalue())

@@ -14,7 +14,7 @@ from typing import Any
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
-from app.workers.processors.base import ProcessorResult
+from app.workers.processors.base import ProcessorResult, check_zip_size
 
 DOCUMENT_TIMEOUT_SECONDS = 120
 
@@ -114,13 +114,11 @@ def _detect_format(data: bytes) -> str:
 def _detect_zip_format(data: bytes) -> str:
     try:
         with zipfile.ZipFile(BytesIO(data)) as archive:
+            check_zip_size(archive)
             names = set(archive.namelist())
             if "mimetype" in names:
-                mimetype = (
-                    archive.read("mimetype")
-                    .decode("ascii", errors="replace")
-                    .strip()
-                )
+                with archive.open("mimetype") as fp:
+                    mimetype = fp.read(128).decode("ascii", errors="replace").strip()
                 fmt = _ODF_MIMETYPES.get(mimetype)
                 if fmt is None:
                     raise ValueError(

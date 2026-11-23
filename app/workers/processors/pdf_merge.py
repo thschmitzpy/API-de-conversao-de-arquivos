@@ -7,7 +7,7 @@ from typing import Any
 from pypdf import PdfReader, PdfWriter
 from pypdf.errors import PdfReadError
 
-from app.workers.processors.base import ProcessorResult
+from app.workers.processors.base import ProcessorResult, check_zip_size
 
 
 def merge(
@@ -37,6 +37,8 @@ def merge(
         if missing:
             raise ValueError(f"nomes em 'order' nao encontrados no ZIP: {missing}")
         pdf_names = order
+
+    check_zip_size(archive, pdf_names)
 
     writer = PdfWriter()
     page_counts: dict[str, int] = {}

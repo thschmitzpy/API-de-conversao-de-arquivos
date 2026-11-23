@@ -5,7 +5,7 @@ from typing import Any
 
 from PIL import Image
 
-from app.workers.processors.base import ProcessorResult
+from app.workers.processors.base import ProcessorResult, open_image
 
 _FORMAT_TO_EXT: dict[str, str] = {
     "JPEG": "jpg",
@@ -44,8 +44,7 @@ def thumbnail(
 
     requested_format = str(parameters.get("format", "")).upper() or None
 
-    image = Image.open(input_stream)
-    image.load()
+    image = open_image(input_stream)
 
     src_format = (image.format or "PNG").upper()
     target_format = requested_format or src_format

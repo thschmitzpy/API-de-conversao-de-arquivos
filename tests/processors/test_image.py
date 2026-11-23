@@ -6,6 +6,7 @@ from io import BytesIO
 import pytest
 from PIL import Image
 
+from app.workers.processors import base
 from app.workers.processors.image import thumbnail
 
 
@@ -151,3 +152,14 @@ def test_quality_invalida_raises(quality):
             _make_png(100, 100),
             {"width": 50, "format": "JPEG", "quality": quality},
         )
+
+
+def test_imagem_acima_do_limite_de_pixels_raises(monkeypatch):
+    monkeypatch.setattr(base, "MAX_IMAGE_PIXELS", 100 * 100 - 1)
+    with pytest.raises(ValueError, match="megapixels"):
+        thumbnail(_make_png(100, 100), {"width": 50})
+
+
+def test_arquivo_que_nao_e_imagem_raises():
+    with pytest.raises(ValueError, match="imagem invalida"):
+        thumbnail(BytesIO(b"nao sou uma imagem"), {"width": 50})

@@ -7,7 +7,11 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
-from app.workers.processors.base import ProcessorResult
+from app.workers.processors.base import (
+    FFMPEG_INPUT_OPTIONS,
+    ProcessorResult,
+    ffmpeg_error_message,
+)
 
 VIDEO_TIMEOUT_SECONDS = 300
 
@@ -53,6 +57,7 @@ def transcode(
 
         cmd = [
             "ffmpeg", "-y",
+            *FFMPEG_INPUT_OPTIONS,
             "-i", str(in_path),
             "-c:v", video_codec,
             "-crf", str(crf),
@@ -81,7 +86,7 @@ def transcode(
         elapsed = time.monotonic() - started
 
         if result.returncode != 0:
-            raise ValueError(f"ffmpeg falhou: {_last_stderr_line(result.stderr)}")
+            raise ValueError(f"ffmpeg falhou: {ffmpeg_error_message(result.stderr)}")
 
         payload = out_path.read_bytes()
 
@@ -98,8 +103,3 @@ def transcode(
             "ffmpeg_duration_seconds": round(elapsed, 2),
         },
     )
-
-
-def _last_stderr_line(stderr: str) -> str:
-    lines = [line.strip() for line in stderr.splitlines() if line.strip()]
-    return lines[-1] if lines else "erro desconhecido"

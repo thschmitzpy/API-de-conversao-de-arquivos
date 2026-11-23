@@ -4,12 +4,12 @@ import csv
 from datetime import date, datetime, time
 from io import BytesIO, StringIO
 from typing import Any
-from zipfile import BadZipfile
+from zipfile import BadZipfile, ZipFile
 
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 
-from app.workers.processors.base import ProcessorResult
+from app.workers.processors.base import ProcessorResult, check_zip_size
 
 
 def to_csv(
@@ -28,6 +28,13 @@ def to_csv(
         "".encode(encoding)
     except LookupError as exc:
         raise ValueError(f"encoding invalido: '{encoding}'") from exc
+
+    try:
+        with ZipFile(input_stream) as archive:
+            check_zip_size(archive)
+    except BadZipfile as exc:
+        raise ValueError(f"arquivo Excel invalido: {exc}") from exc
+    input_stream.seek(0)
 
     try:
         wb = load_workbook(input_stream, read_only=True, data_only=True)

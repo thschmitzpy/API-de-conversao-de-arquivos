@@ -7,6 +7,7 @@ from io import BytesIO
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from app.workers.processors.video_transcode import transcode
 
@@ -166,3 +167,10 @@ def test_crf_bool_raises(sample_mp4):
 def test_input_nao_video_raises():
     with pytest.raises(ValueError, match="ffmpeg falhou"):
         transcode(BytesIO(b"nao sou video"), {})
+
+
+def test_entrada_fora_dos_formatos_de_video_raises():
+    png = BytesIO()
+    Image.new("RGB", (64, 64)).save(png, format="PNG")
+    with pytest.raises(ValueError, match="formato de entrada nao suportado"):
+        transcode(BytesIO(png.getvalue()), {})

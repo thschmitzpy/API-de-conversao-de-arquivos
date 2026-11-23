@@ -6,6 +6,7 @@ from io import BytesIO
 import pytest
 from openpyxl import Workbook
 
+from app.workers.processors import base
 from app.workers.processors.excel_to_csv import to_csv
 
 
@@ -169,3 +170,9 @@ def test_sheet_como_bool_raises():
 def test_sheet_como_tipo_invalido_raises():
     with pytest.raises(ValueError, match="sheet"):
         to_csv(_make_xlsx(), {"sheet": [0]})
+
+
+def test_xlsx_acima_do_limite_descompactado_raises(monkeypatch):
+    monkeypatch.setattr(base, "MAX_UNCOMPRESSED_BYTES", 100)
+    with pytest.raises(ValueError, match="excede o limite"):
+        to_csv(_make_xlsx(), {})

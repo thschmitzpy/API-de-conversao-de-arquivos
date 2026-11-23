@@ -7,9 +7,10 @@ from typing import Any
 
 import pypdfium2 as pdfium
 import pytesseract
-from PIL import Image, UnidentifiedImageError
 
-from app.workers.processors.base import ProcessorResult
+from app.workers.processors.base import ProcessorResult, check_pixels, open_image
+
+MAX_OCR_PAGES = 50
 
 _PDF_MAGIC = b"%PDF-"
 _IMAGE_MAGICS = (
@@ -74,11 +75,7 @@ def extract(
     pages_text: list[tuple[int, str]] = []
 
     if source_type == "image":
-        try:
-            image = Image.open(BytesIO(data))
-            image.load()
-        except (UnidentifiedImageError, OSError) as exc:
-            raise ValueError(f"imagem invalida: {exc}") from exc
+        image = open_image(BytesIO(data))
         text = pytesseract.image_to_string(image, lang=lang)
         pages_text.append((1, text))
     else:
@@ -90,8 +87,19 @@ def extract(
         n_pages = len(pdf)
         if n_pages == 0:
             raise ValueError("PDF sem paginas")
+        if n_pages > MAX_OCR_PAGES:
+            raise ValueError(
+                f"PDF com {n_pages} paginas excede o limite de {MAX_OCR_PAGES} para OCR"
+            )
 
         scale = dpi / 72.0
+        for i in range(n_pages):
+            width, height = pdf[i].get_size()
+            try:
+                check_pixels(int(width * scale), int(height * scale))
+            except ValueError as exc:
+                raise ValueError(f"pagina {i + 1}: {exc}; reduza o dpi") from exc
+
         for i in range(n_pages):
             page = pdf[i]
             pil_image = page.render(scale=scale).to_pil()

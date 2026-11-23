@@ -9,6 +9,7 @@ from PIL import Image, ImageDraw, ImageFont
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas as rl_canvas
 
+from app.workers.processors import base, ocr_extract
 from app.workers.processors.ocr_extract import extract
 
 pytestmark = pytest.mark.skipif(
@@ -180,3 +181,15 @@ def test_imagem_invalida_raises():
     bad_png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 50
     with pytest.raises(ValueError, match="imagem invalida"):
         extract(BytesIO(bad_png), {})
+
+
+def test_pdf_acima_do_limite_de_paginas_raises(monkeypatch):
+    monkeypatch.setattr(ocr_extract, "MAX_OCR_PAGES", 1)
+    with pytest.raises(ValueError, match="limite de 1 para OCR"):
+        extract(_make_pdf(["A", "B"]), {})
+
+
+def test_pagina_grande_demais_para_o_dpi_raises(monkeypatch):
+    monkeypatch.setattr(base, "MAX_IMAGE_PIXELS", 1_000_000)
+    with pytest.raises(ValueError, match="reduza o dpi"):
+        extract(_make_pdf(["A"]), {"dpi": 300})

@@ -9,6 +9,7 @@ from reportlab.lib import pdfencrypt
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
+from app.workers.processors import base
 from app.workers.processors.pdf_merge import merge
 
 
@@ -243,3 +244,10 @@ def test_ordem_alfabetica_default_com_subdirs():
     result = merge(zip_input, {})
 
     assert result.result_metadata["files_merged"] == ["a/1.pdf", "z/1.pdf"]
+
+
+def test_zip_acima_do_limite_descompactado_raises(monkeypatch):
+    monkeypatch.setattr(base, "MAX_UNCOMPRESSED_BYTES", 100)
+    zip_input = _make_zip({"a.pdf": _make_pdf(1), "b.pdf": _make_pdf(1)})
+    with pytest.raises(ValueError, match="excede o limite"):
+        merge(zip_input, {})
