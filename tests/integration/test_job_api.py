@@ -260,3 +260,31 @@ def test_post_jobs_acima_do_limite_rejeita_antes_do_upload(client, monkeypatch):
     assert objects == []
 
     assert calls == []
+
+
+def test_post_jobs_nome_longo_rejeita_antes_do_upload(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "app.api.jobs.celery_app.send_task",
+        lambda *a, **kw: calls.append(a),
+    )
+
+    response = client.post(
+        "/jobs",
+        files={"file": ("a" * 252 + ".png", make_png_bytes(), "image/png")},
+        data={"operation": "image.thumbnail"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Nome de arquivo excede 255 bytes"
+
+    with SessionLocal() as db:
+        assert db.query(Job).count() == 0
+
+    settings = get_settings()
+    objects = list(
+        get_client().list_objects(settings.minio_bucket_input, recursive=True)
+    )
+    assert objects == []
+
+    assert calls == []

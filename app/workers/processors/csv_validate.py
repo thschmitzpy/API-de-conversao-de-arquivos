@@ -35,6 +35,7 @@ def validate(
     if mode not in ("report", "clean"):
         raise ValueError(f"mode invalido: '{mode}' (use 'report' ou 'clean')")
 
+    row_model = _build_row_model(columns)
     declared_names = [c["name"] for c in columns]
 
     try:
@@ -56,8 +57,6 @@ def validate(
         if missing:
             raise ValueError(f"colunas declaradas ausentes no CSV: {missing}")
         df = df[declared_names]
-
-    row_model = _build_row_model(columns)
 
     total_rows = len(df)
     errors: list[dict[str, Any]] = []
@@ -120,6 +119,8 @@ def validate(
 def _build_row_model(columns: list[dict[str, Any]]):
     fields: dict[str, tuple[Any, Any]] = {}
     for col in columns:
+        if not isinstance(col, dict):
+            raise ValueError("cada item de 'columns' deve ser um objeto")
         name = col.get("name")
         if not name:
             raise ValueError("coluna sem 'name'")

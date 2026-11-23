@@ -354,7 +354,7 @@ docker compose run --rm --no-deps --entrypoint="" worker pytest \
 
 > No PowerShell, use `--entrypoint=""` com o sinal de igual — sem ele o PS descarta a string vazia.
 
-Cobertura atual: **250+ testes** em 24 suites — processors (unit), webhook (com e sem retry), rate limit, reaper de jobs presos, retenção de arquivos e integração end-to-end (POST → worker → GET → MinIO).
+Cobertura atual: **250+ testes** em 25 suites — processors (unit), webhook (com e sem retry), rate limit, reaper de jobs presos, retenção de arquivos e integração end-to-end (POST → worker → GET → MinIO).
 
 Frontend (Node 22):
 

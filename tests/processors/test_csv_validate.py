@@ -192,3 +192,13 @@ def test_custom_delimiter():
         "valid_rows": 2,
         "invalid_rows": 0,
     }
+
+
+def test_coluna_sem_name_raises():
+    with pytest.raises(ValueError, match="sem 'name'"):
+        validate(_csv("id\n1\n"), {"columns": [{"type": "int"}]})
+
+
+def test_coluna_que_nao_e_objeto_raises():
+    with pytest.raises(ValueError, match="objeto"):
+        validate(_csv("id\n1\n"), {"columns": ["id"]})

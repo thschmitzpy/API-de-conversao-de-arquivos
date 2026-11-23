@@ -1,5 +1,6 @@
 import io
 import json
+import re
 import uuid
 from datetime import timedelta
 from pathlib import PurePosixPath, PureWindowsPath
@@ -87,11 +88,28 @@ def _parse_parameters(raw: str | None) -> dict[str, Any]:
     return parsed
 
 
+MAX_FILENAME_BYTES = 255
+MAX_CONTENT_TYPE_LENGTH = 128
+
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+
+
 def _safe_filename(raw: str) -> str:
-    name = PureWindowsPath(raw).name
+    name = _CONTROL_CHARS.sub("", PureWindowsPath(raw).name).strip()
     if not name:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nome de arquivo invalido")
+    if len(name.encode("utf-8")) > MAX_FILENAME_BYTES:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Nome de arquivo excede {MAX_FILENAME_BYTES} bytes",
+        )
     return name
+
+
+def _safe_content_type(raw: str | None) -> str:
+    if not raw or len(raw) > MAX_CONTENT_TYPE_LENGTH or _CONTROL_CHARS.search(raw):
+        return "application/octet-stream"
+    return raw
 
 
 @router.post(
@@ -106,7 +124,8 @@ def _safe_filename(raw: str) -> str:
     ),
     responses={
         400: _error(
-            "Arquivo sem nome, vazio ou parameters com JSON invalido",
+            "Arquivo sem nome, nome acima de 255 bytes, arquivo vazio "
+            "ou parameters com JSON invalido",
             "Arquivo vazio",
         ),
         413: _error("Arquivo acima do limite de upload", "Arquivo excede o limite de 100 MB"),
@@ -169,7 +188,7 @@ def create_job(
 
     job_id = uuid.uuid4()
     input_key = f"{job_id}/{filename}"
-    content_type = file.content_type or "application/octet-stream"
+    content_type = _safe_content_type(file.content_type)
 
     try:
         upload_stream(

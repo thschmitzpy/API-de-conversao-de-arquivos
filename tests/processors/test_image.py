@@ -127,3 +127,27 @@ def test_thumbnail_nao_aumenta_imagem():
     out = Image.open(result.output)
     assert out.width == 50
     assert out.height == 50
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"width": True},
+        {"width": 0},
+        {"height": -10},
+        {"width": "100"},
+        {"width": 10.5},
+    ],
+)
+def test_dimensao_invalida_raises(params):
+    with pytest.raises(ValueError, match="inteiro positivo"):
+        thumbnail(_make_png(100, 100), params)
+
+
+@pytest.mark.parametrize("quality", [True, 0, 101, "85"])
+def test_quality_invalida_raises(quality):
+    with pytest.raises(ValueError, match="quality"):
+        thumbnail(
+            _make_png(100, 100),
+            {"width": 50, "format": "JPEG", "quality": quality},
+        )

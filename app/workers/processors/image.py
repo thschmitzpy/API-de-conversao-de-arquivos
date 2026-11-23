@@ -27,10 +27,20 @@ def thumbnail(
     input_stream: BytesIO,
     parameters: dict[str, Any],
 ) -> ProcessorResult:
-    width = parameters.get("width")
-    height = parameters.get("height")
-    if not width and not height:
+    width = _dimension(parameters, "width")
+    height = _dimension(parameters, "height")
+    if width is None and height is None:
         raise ValueError("parameters deve conter 'width' e/ou 'height'")
+
+    quality = parameters.get("quality", _DEFAULT_QUALITY)
+    if (
+            isinstance(quality, bool)
+            or not isinstance(quality, int)
+            or not 1 <= quality <= 100
+    ):
+        raise ValueError(
+            f"'quality' deve ser inteiro entre 1 e 100 (recebido: {quality!r})"
+        )
 
     requested_format = str(parameters.get("format", "")).upper() or None
 
@@ -45,8 +55,8 @@ def thumbnail(
             f"Formato '{target_format}' nao suportado. Suportados: {supported}"
         )
 
-    target_w = int(width) if width else _UNBOUNDED
-    target_h = int(height) if height else _UNBOUNDED
+    target_w = width or _UNBOUNDED
+    target_h = height or _UNBOUNDED
     image.thumbnail((target_w, target_h), Image.Resampling.LANCZOS)
 
     if target_format == "JPEG" and image.mode in ("RGBA", "P", "LA"):
@@ -54,7 +64,7 @@ def thumbnail(
 
     save_kwargs: dict[str, Any] = {}
     if target_format in ("JPEG", "WEBP"):
-        save_kwargs["quality"] = int(parameters.get("quality", _DEFAULT_QUALITY))
+        save_kwargs["quality"] = quality
     if target_format in ("JPEG", "PNG"):
         save_kwargs["optimize"] = True
 
@@ -73,3 +83,12 @@ def thumbnail(
             "size_bytes": output.getbuffer().nbytes,
         },
     )
+
+
+def _dimension(parameters: dict[str, Any], key: str) -> int | None:
+    value = parameters.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"'{key}' deve ser inteiro positivo (recebido: {value!r})")
+    return value
