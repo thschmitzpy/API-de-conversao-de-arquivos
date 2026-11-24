@@ -6,6 +6,7 @@ import pytest
 from pypdf import PdfReader
 from reportlab.lib import pdfencrypt
 from reportlab.lib.pagesizes import letter
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
 from app.workers.processors.pdf_watermark import watermark
@@ -183,3 +184,31 @@ def test_pdf_invalido_raises():                                              # -
 def test_pdf_encriptado_raises():
     with pytest.raises(ValueError, match="encriptado"):
         watermark(_make_encrypted_pdf(), {"text": "X"})
+
+
+def test_texto_longo_reduz_a_fonte_para_caber():
+    result = watermark(_make_pdf(1), {"text": "M" * 60})
+
+    assert 8 <= result.result_metadata["font_size"] < 20
+
+
+@pytest.mark.parametrize("position", ["diagonal", "center", "footer", "header"])
+def test_texto_longo_nao_passa_da_pagina(position):
+    text = "DOCUMENTO CONFIDENCIAL - NAO DISTRIBUIR FORA DA EMPRESA"
+    result = watermark(_make_pdf(1), {"text": text, "position": position})
+
+    width = stringWidth(text, "Helvetica-Bold", result.result_metadata["font_size"])
+    page_width = letter[0]
+    assert width < (page_width * 2**0.5 if position == "diagonal" else page_width)
+
+
+def test_texto_extremo_respeita_fonte_minima():
+    result = watermark(_make_pdf(1), {"text": "M" * 1000})
+
+    assert result.result_metadata["font_size"] == 8
+
+
+def test_font_size_informado_nao_e_ajustado():
+    result = watermark(_make_pdf(1), {"text": "M" * 60, "font_size": 48})
+
+    assert result.result_metadata["font_size"] == 48

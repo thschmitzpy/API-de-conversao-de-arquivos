@@ -6,10 +6,15 @@ from typing import Any
 from pypdf import PdfReader, PdfWriter
 from pypdf.errors import PdfReadError
 from reportlab.lib.colors import Color
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
 from app.workers.processors.base import ProcessorResult
 
+_FONT_NAME = "Helvetica-Bold"
+_DEFAULT_FONT_SIZE = 48
+_MIN_FONT_SIZE = 8
+_FIT_RATIO = 0.9
 _POSITIONS = ("diagonal", "center", "footer", "header")
 _COLORS: dict[str, tuple[float, float, float]] = {
     "gray": (0.5, 0.5, 0.5),
@@ -41,8 +46,8 @@ def watermark(
     ):
         raise ValueError("'opacity' deve ser numero em (0, 1]")
 
-    font_size = parameters.get("font_size", 48)
-    if (
+    font_size = parameters.get("font_size")
+    if font_size is not None and (
             isinstance(font_size, bool)
             or not isinstance(font_size, int)
             or font_size <= 0
@@ -69,16 +74,19 @@ def watermark(
         raise ValueError("PDF sem paginas")
 
     writer = PdfWriter()
+    used_sizes: list[int] = []
     for page in reader.pages:
         width = float(page.mediabox.width)
         height = float(page.mediabox.height)
+        page_font_size = font_size or _fit_font_size(text, width, height, position)
+        used_sizes.append(page_font_size)
         overlay_page = _build_overlay(
             width=width,
             height=height,
             text=text,
             position=position,
             opacity=float(opacity),
-            font_size=font_size,
+            font_size=page_font_size,
             rgb=rgb,
         )
         page.merge_page(overlay_page)
@@ -98,10 +106,20 @@ def watermark(
             "text": text,
             "position": position,
             "opacity": float(opacity),
-            "font_size": font_size,
+            "font_size": min(used_sizes),
             "color": color_name,
         },
     )
+
+
+def _fit_font_size(text: str, width: float, height: float, position: str) -> int:
+
+    available = min(width, height) * 2**0.5 if position == "diagonal" else width
+    available *= _FIT_RATIO
+    natural = stringWidth(text, _FONT_NAME, _DEFAULT_FONT_SIZE)
+    if natural <= available:
+        return _DEFAULT_FONT_SIZE
+    return max(_MIN_FONT_SIZE, int(_DEFAULT_FONT_SIZE * available / natural))
 
 
 def _build_overlay(
@@ -118,7 +136,7 @@ def _build_overlay(
     c = canvas.Canvas(buf, pagesize=(width, height))
     r, g, b = rgb
     c.setFillColor(Color(r, g, b, alpha=opacity))
-    c.setFont("Helvetica-Bold", font_size)
+    c.setFont(_FONT_NAME, font_size)
 
     if position == "diagonal":
         c.saveState()

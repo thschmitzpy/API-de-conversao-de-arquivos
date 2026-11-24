@@ -35,6 +35,13 @@ def _make_noisy_png(size: int, seed: int = 42) -> BytesIO:
     return buf
 
 
+def _encode(image: Image.Image, fmt: str, **kwargs) -> BytesIO:
+    buf = BytesIO()
+    image.save(buf, format=fmt, **kwargs)
+    buf.seek(0)
+    return buf
+
+
 def test_reduz_dimensoes_mantendo_aspect_ratio():
     result = thumbnail(_make_png(200, 100), {"width": 100})
 
@@ -163,3 +170,85 @@ def test_imagem_acima_do_limite_de_pixels_raises(monkeypatch):
 def test_arquivo_que_nao_e_imagem_raises():
     with pytest.raises(ValueError, match="imagem invalida"):
         thumbnail(BytesIO(b"nao sou uma imagem"), {"width": 50})
+
+
+@pytest.mark.parametrize("fmt", ["JPEG", "PNG", "WEBP"])
+def test_orientacao_exif_aplicada(fmt):
+    exif = Image.Exif()
+    exif[0x0112] = 6
+    source = _encode(Image.new("RGB", (40, 30)), fmt, exif=exif)
+
+    result = thumbnail(source, {"width": 100, "height": 100})
+
+    out = Image.open(result.output)
+    assert out.size == (30, 40)
+    assert 0x0112 not in out.getexif()
+    assert result.result_metadata["format"] == fmt
+
+
+def test_exif_corrompido_nao_impede_conversao():
+    source = _encode(Image.new("RGB", (40, 30)), "PNG", exif=b"Exif\x00\x00lixo")
+
+    result = thumbnail(source, {"width": 20})
+
+    assert Image.open(result.output).size == (20, 15)
+
+
+def test_foto_mpo_de_celular_vira_jpeg():
+    source = _encode(
+        Image.new("RGB", (40, 30), "red"),
+        "MPO",
+        save_all=True,
+        append_images=[Image.new("RGB", (10, 10))],
+    )
+
+    result = thumbnail(source, {"width": 20})
+
+    assert result.output_extension == "jpg"
+    assert Image.open(result.output).format == "JPEG"
+
+
+@pytest.mark.parametrize("mode", ["RGBA", "LA", "P"])
+def test_transparencia_vira_fundo_branco_em_jpeg(mode):
+    image = Image.new("RGBA", (20, 20), (0, 0, 0, 0)).convert(mode)
+    kwargs = {"transparency": image.getpixel((0, 0))} if mode == "P" else {}
+
+    result = thumbnail(_encode(image, "PNG", **kwargs), {"width": 20, "format": "JPEG"})
+
+    assert Image.open(result.output).convert("RGB").getpixel((10, 10)) == (255, 255, 255)
+
+
+@pytest.mark.parametrize("fmt", ["PNG", "GIF", "WEBP", "JPEG"])
+def test_jpeg_cmyk_vira_rgb(fmt):
+    source = _encode(
+        Image.new("CMYK", (20, 20), (0, 255, 255, 0)),
+        "JPEG",
+        icc_profile=b"perfil cmyk",
+    )
+
+    result = thumbnail(source, {"width": 20, "format": fmt})
+
+    out = Image.open(result.output)
+    red, green, blue = out.convert("RGB").getpixel((10, 10))
+    assert out.mode != "CMYK"
+    assert red > 240 and green < 15 and blue < 15
+    assert "icc_profile" not in out.info
+
+
+@pytest.mark.parametrize("fmt", ["JPEG", "WEBP", "GIF"])
+def test_png_16_bits_mantem_tons_ao_virar_8_bits(fmt):
+    source = _encode(Image.new("I;16", (20, 20), 32768), "PNG")
+
+    result = thumbnail(source, {"width": 10, "format": fmt})
+
+    assert abs(Image.open(result.output).convert("L").getpixel((5, 5)) - 127) <= 3
+
+
+def test_png_16_bits_continua_16_bits_em_png():
+    source = _encode(Image.new("I;16", (20, 20), 32768), "PNG")
+
+    result = thumbnail(source, {"width": 10})
+
+    out = Image.open(result.output)
+    assert out.mode == "I;16"
+    assert out.size == (10, 10)

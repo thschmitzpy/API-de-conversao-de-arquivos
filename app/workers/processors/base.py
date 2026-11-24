@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from io import BytesIO
 from typing import Any, BinaryIO, Protocol
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 MAX_IMAGE_PIXELS = 50_000_000
 MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
@@ -55,6 +55,11 @@ def open_image(stream: BinaryIO) -> Image.Image:
         image.load()
     except OSError as exc:
         raise ValueError("imagem invalida ou corrompida") from exc
+    try:
+        ImageOps.exif_transpose(image, in_place=True)
+    except Exception:
+        # EXIF corrompido: segue com a orientacao gravada nos pixels.
+        pass
     return image
 
 

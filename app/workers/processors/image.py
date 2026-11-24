@@ -19,6 +19,13 @@ _FORMAT_TO_MIME: dict[str, str] = {
     "WEBP": "image/webp",
     "GIF": "image/gif",
 }
+# Modos que cada formato grava sem conversao previa.
+_SAVE_MODES: dict[str, set[str]] = {
+    "JPEG": {"1", "L", "RGB"},
+    "PNG": {"1", "L", "LA", "P", "I", "I;16", "RGB", "RGBA"},
+    "WEBP": {"1", "L", "LA", "P", "RGB", "RGBA"},
+    "GIF": {"1", "L", "LA", "P", "RGB", "RGBA"},
+}
 _DEFAULT_QUALITY = 85
 _UNBOUNDED = 100_000
 
@@ -47,6 +54,9 @@ def thumbnail(
     image = open_image(input_stream)
 
     src_format = (image.format or "PNG").upper()
+    if src_format == "MPO":
+        # JPEG de celular com imagens extras embutidas (HDR, profundidade).
+        src_format = "JPEG"
     target_format = requested_format or src_format
     if target_format not in _FORMAT_TO_MIME:
         supported = ", ".join(sorted(_FORMAT_TO_MIME.keys()))
@@ -58,8 +68,7 @@ def thumbnail(
     target_h = height or _UNBOUNDED
     image.thumbnail((target_w, target_h), Image.Resampling.LANCZOS)
 
-    if target_format == "JPEG" and image.mode in ("RGBA", "P", "LA"):
-        image = image.convert("RGB")
+    image = _to_save_mode(image, target_format)
 
     save_kwargs: dict[str, Any] = {}
     if target_format in ("JPEG", "WEBP"):
@@ -82,6 +91,27 @@ def thumbnail(
             "size_bytes": output.getbuffer().nbytes,
         },
     )
+
+
+def _to_save_mode(image: Image.Image, target_format: str) -> Image.Image:
+    if target_format == "JPEG" and image.has_transparency_data:
+        return _flatten_on_white(image)
+    if image.mode in _SAVE_MODES[target_format]:
+        return image
+    if image.mode.startswith("I;16"):
+
+        return image.convert("I").point(lambda value: value * (1 / 257)).convert("L")
+    converted = image.convert("RGB")
+
+    converted.info.pop("icc_profile", None)
+    return converted
+
+
+def _flatten_on_white(image: Image.Image) -> Image.Image:
+    rgba = image if image.mode == "RGBA" else image.convert("RGBA")
+    background = Image.new("RGB", rgba.size, "white")
+    background.paste(rgba, mask=rgba.getchannel("A"))
+    return background
 
 
 def _dimension(parameters: dict[str, Any], key: str) -> int | None:

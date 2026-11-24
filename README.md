@@ -66,12 +66,12 @@ Fluxo:
 
 | `operation` | Entrada | Saída | Parâmetros principais |
 |---|---|---|---|
-| `image.thumbnail` | PNG / JPEG / WEBP / GIF | mesmo formato (ou `format` escolhido) | `width`, `height`, `format`, `quality` |
+| `image.thumbnail` | PNG / JPEG / WEBP / GIF | mesmo formato (ou `format` escolhido); aplica a orientação EXIF, e transparência vira fundo branco em JPEG | `width`, `height`, `format`, `quality` |
 | `csv.validate` | CSV | relatório JSON | `columns` (schema declarativo), `delimiter`, `has_header`, `encoding`, `mode` |
 | `excel.to-csv` | XLSX | CSV | `sheet` (nome ou índice), `delimiter`, `encoding`, `include_header` |
 | `pdf.extract-text` | PDF | TXT ou JSON | `pages` (ex: `"1-3,5"`), `output_format` (`text` ou `json`) |
 | `pdf.merge` | ZIP de PDFs | PDF único | `order` (lista de nomes; se ausente, ordem alfabética) |
-| `pdf.watermark` | PDF | PDF com marca d'água | `text`, `position` (`diagonal`/`center`/`footer`/`header`), `opacity` (0–1), `font_size`, `color` (`gray`/`black`/`red`/`blue`) |
+| `pdf.watermark` | PDF | PDF com marca d'água | `text`, `position` (`diagonal`/`center`/`footer`/`header`), `opacity` (0–1), `font_size` (omitido: até 48, reduzido para o texto caber na página), `color` (`gray`/`black`/`red`/`blue`) |
 | `video.transcode` | MP4 / MOV / MKV / WebM / AVI e outros containers comuns | MP4 ou WebM | `format`, `resolution` (`480p`/`720p`/`1080p`), `crf` (18-28), `strip_audio` |
 | `audio.extract` | áudio (MP3 / WAV / OGG / AAC / M4A / FLAC) ou vídeo | MP3 / WAV / OGG / AAC | `format`, `bitrate`, `sample_rate`, `channels` |
 | `ocr.extract` | PDF ou imagem (PNG/JPEG/WEBP/GIF) | TXT ou JSON | `lang` (`eng`, `por`, `por+eng`, …), `output_format` (`text` ou `json`), `dpi` (72-600, só para PDF) |
