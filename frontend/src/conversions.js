@@ -5,8 +5,8 @@
 export const LIMITE_UPLOAD_BYTES = 100 * 1024 * 1024;
 
 // O thumbnail do Pillow nunca amplia a imagem: com um teto alto, a operação
-// vira só troca de formato (imagens maiores que isso são reduzidas).
-const TETO_IMAGEM = 4096;
+// vira só troca de formato. 16383 px é o maior lado que o WebP aceita.
+const TETO_IMAGEM = 16383;
 
 const FORMATOS_IMAGEM = [
   {

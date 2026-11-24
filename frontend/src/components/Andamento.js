@@ -5,6 +5,8 @@ import { urlDownload } from '../services/api';
 
 const ETAPAS = ['Envio', 'Na fila', 'Processando', 'Pronto'];
 
+const MAX_TIMEOUT_MS = 2 ** 31 - 1;
+
 function etapaAtual(jobId, job) {
   if (!jobId) {
     return 0;
@@ -53,12 +55,23 @@ export default function Andamento({
     if (!expiraEm) {
       return undefined;
     }
-    const restante = new Date(expiraEm).getTime() - Date.now();
-    if (restante <= 0) {
-      setPrazoVencido(true);
+    const prazo = new Date(expiraEm).getTime();
+    if (Number.isNaN(prazo)) {
       return undefined;
     }
-    const timer = setTimeout(() => setPrazoVencido(true), restante);
+
+    let timer = null;
+
+    function conferir() {
+      const restante = prazo - Date.now();
+      if (restante <= 0) {
+        setPrazoVencido(true);
+        return;
+      }
+      timer = setTimeout(conferir, Math.min(restante, MAX_TIMEOUT_MS));
+    }
+
+    conferir();
     return () => clearTimeout(timer);
   }, [expiraEm]);
 

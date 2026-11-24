@@ -5,6 +5,7 @@ import OpcoesConversao from './components/OpcoesConversao';
 import SeletorArquivo from './components/SeletorArquivo';
 import { LIMITE_UPLOAD_BYTES, extensaoDe, opcoesPara } from './conversions';
 import { formatarBytes } from './formatar';
+import useBloquearDrop from './hooks/useBloquearDrop';
 import { criarJob, mensagemDeErro } from './services/api';
 import { carregarLimiteUpload } from './services/config';
 
@@ -14,6 +15,8 @@ export default function App() {
   const [valores, setValores] = useState({});
   const [envio, setEnvio] = useState(null);
   const [limiteBytes, setLimiteBytes] = useState(LIMITE_UPLOAD_BYTES);
+
+  useBloquearDrop();
 
   useEffect(() => {
     carregarLimiteUpload().then((bytes) => {

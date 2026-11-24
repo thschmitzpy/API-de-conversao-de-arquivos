@@ -43,8 +43,8 @@ describe('opcoesPara', () => {
 
   test('troca para JPG envia "jpeg", que e o nome que o Pillow aceita', () => {
     expect(opcao('a.png', 'imagem-jpeg').parametros({})).toEqual({
-      width: 4096,
-      height: 4096,
+      width: 16383,
+      height: 16383,
       format: 'jpeg',
     });
   });
