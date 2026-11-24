@@ -17,4 +17,4 @@ def test_webhook_job_finished_usa_webhook_payload():
 def test_webhook_documenta_headers_de_assinatura():
     headers = {p["name"] for p in _webhook_spec()["parameters"] if p["in"] == "header"}
 
-    assert headers == {"x-conversor-signature", "x-conversor-event"}
+    assert headers == {"x-conversor-signature", "x-conversor-timestamp", "x-conversor-event"}

@@ -47,7 +47,7 @@ Python 3.13 · Poetry 1.8
       │
       ▼
 ┌─────────────┐  ◀─── POST assinado HMAC-SHA256 (se callback_url informado)
-│ callback_url│       retry exponencial via tenacity
+│ callback_url│       task própria, retry exponencial pela fila
 └─────────────┘
 ```
 
@@ -57,7 +57,7 @@ Fluxo:
 2. API valida tamanho/formato, salva o input no MinIO, cria a linha em `jobs` e enfileira a task Celery. Devolve `202 Accepted` com `job_id` e `status_url`.
 3. Worker consome a fila, baixa o input, chama o processor correspondente e salva o output no MinIO.
 4. Worker atualiza o `Job` no Postgres (status, `output_key`, `result_metadata`, `finished_at`).
-5. Se o cliente informou `callback_url`, worker dispara webhook assinado com HMAC-SHA256 (retry exponencial).
+5. Se o cliente informou `callback_url`, o worker enfileira a task `deliver_webhook`, que envia o resultado assinado com HMAC-SHA256 (retry exponencial pela fila).
 6. Cliente consulta `GET /jobs/{id}`. Com o job em `DONE`, a resposta traz `download_url`, que aponta para `GET /jobs/{id}/download` e entrega o arquivo pela própria API. Esse é o caminho que o frontend usa. Quando `MINIO_PUBLIC_ENDPOINT` está definido, a resposta também traz `output_url`, um link presigned para baixar direto do storage.
 
 ---
@@ -263,7 +263,7 @@ Resposta:
 
 ### 4. Receber webhook ao concluir
 
-Passe `-F "callback_url=https://seu-endpoint/..."` no `POST /jobs`. Ao finalizar, o worker envia `POST` no endpoint com o payload JSON do resultado, assinado no header `X-Conversor-Signature` (`sha256=<hmac hex>`) usando HMAC-SHA256 sobre o corpo bruto e o segredo `WEBHOOK_SIGNING_SECRET` do `.env`. Respostas 5xx, timeout e erros de rede disparam retry exponencial via tenacity; 4xx é tratado como falha definitiva. O formato completo do payload, com exemplos, está na seção **Webhooks** do `/docs`.
+Passe `-F "callback_url=https://seu-endpoint/..."` no `POST /jobs`. Ao finalizar, o worker envia `POST` no endpoint com o payload JSON do resultado e dois headers: `X-Conversor-Timestamp` (Unix, em segundos) e `X-Conversor-Signature` (`sha256=<hmac hex>`), o HMAC-SHA256 de `"<timestamp>." + corpo bruto` com o segredo `WEBHOOK_SIGNING_SECRET` do `.env`. O receptor confere a assinatura e recusa timestamps com mais de 5 minutos, o que impede reenviar uma requisição capturada. Respostas 5xx, timeout e erros de rede reagendam a entrega na fila com espera exponencial (1 s a 30 s, até `WEBHOOK_MAX_RETRIES` tentativas), cada uma com timestamp novo; 4xx é tratado como falha definitiva. O código de verificação e o payload completo, com exemplos, estão na seção **Webhooks** do `/docs`.
 
 O `callback_url` precisa usar `http` ou `https`, não pode ter credenciais na URL e tem limite de 2048 caracteres. O host é resolvido no `POST /jobs` e todos os IPs retornados precisam ser públicos: `localhost`, faixas privadas, link-local (inclusive `169.254.169.254`, o metadata de nuvem) e nomes internos como `minio` ou `postgres` levam `400` antes do upload. O worker repete a checagem logo antes de enviar, porque o DNS pode mudar entre a criação do job e o disparo. Para testar com um receptor local, use `WEBHOOK_ALLOW_PRIVATE_TARGETS=true` no `.env`. O padrão é `false`.
 
@@ -356,7 +356,7 @@ docker compose run --rm --no-deps --entrypoint="" worker pytest \
 
 > No PowerShell, use `--entrypoint=""` com o sinal de igual — sem ele o PS descarta a string vazia.
 
-Cobertura atual: **250+ testes** em 25 suites — processors (unit), webhook (com e sem retry), rate limit, reaper de jobs presos, retenção de arquivos e integração end-to-end (POST → worker → GET → MinIO).
+Cobertura atual: **250+ testes** em 26 suites — processors (unit), webhook (com e sem retry), rate limit, reaper de jobs presos, retenção de arquivos e integração end-to-end (POST → worker → GET → MinIO).
 
 Frontend (Node 22):
 
@@ -393,7 +393,7 @@ app/
 ├── api/              Endpoints HTTP (jobs.py, health.py)
 ├── broker/           Fábrica da app Celery
 ├── storage/          Cliente MinIO (upload, presigned, ensure_buckets)
-├── webhook/          Notifier HMAC + retry
+├── webhook/          Notifier HMAC com timestamp, guarda de URL, docs do webhook
 ├── workers/          Celery tasks + processors
 │   └── processors/   image, csv, excel, pdf (extract/merge/watermark), video, audio, ocr, document
 ├── auth.py           Validação do header X-API-Key
@@ -417,7 +417,7 @@ tests/
 ├── processors/       Testes unitários dos processors
 ├── integration/      End-to-end contra Postgres/Redis/MinIO reais do compose
 ├── unit/             Logging JSON + consistência enum Operation × processors
-├── webhook/          Notifier + retry
+├── webhook/          Notifier (assinatura e classificação de erro)
 └── rate_limit/       Comportamento do slowapi
 ```
 
@@ -431,7 +431,8 @@ tests/
 - **Download pela API, presigned URL opcional** — o `download_url` (`GET /jobs/{id}/download`) funciona em qualquer ambiente, porque só depende da API estar acessível. O `output_url` presigned deixa o cliente baixar direto do storage sem a API virar proxy de arquivo, mas exige o MinIO exposto. Por isso ele só é gerado quando `MINIO_PUBLIC_ENDPOINT` está definido. Em produção o MinIO fica fechado e tudo sai pela API.
 - **Chave da API só no nginx** — o navegador nunca recebe a `X-API-Key`; o nginx a injeta nas chamadas para `/api`. Como quem passa pelo proxy já sai autenticado, ele libera só as rotas que a tela usa, e a listagem de jobs fica de fora.
 - **`X-Forwarded-For` sobrescrito na borda** — o nginx grava o IP real do cliente em vez de anexar, e no cluster a API fica em ClusterIP. Assim um cabeçalho forjado não burla o rate limit. Atrás de um proxy (Caddy, balanceador da nuvem), o módulo `realip` lê o `X-Forwarded-For` apenas de conexões vindas de `TRUSTED_PROXY_CIDR`; o padrão `127.0.0.1/32` mantém o cabeçalho ignorado.
-- **Webhook com HMAC-SHA256** — o cliente consegue validar criptograficamente que o payload veio deste serviço.
+- **Webhook com HMAC-SHA256 e timestamp** — o cliente valida que o payload veio deste serviço, e como a assinatura cobre o `X-Conversor-Timestamp`, uma requisição capturada não pode ser reenviada fora da janela de 5 minutos.
+- **Entrega do webhook em task própria** — o `process_job` e o reaper só enfileiram `deliver_webhook`. Cada execução faz uma tentativa e, em 5xx, timeout ou erro de rede, se reagenda com `self.retry(countdown=...)`. Antes o retry era um `sleep` dentro da task de processamento: um callback fora do ar prendia um dos slots do worker por até um minuto, e os jobs seguintes esperavam na fila. O contador de tentativas fica no banco e o `callback_delivered_at` impede reenviar o que já foi entregue.
 - **`callback_url` só para endereços públicos** — o webhook é um `POST` que parte de dentro da rede dos containers, e o nginx do frontend repassa o `callback_url` já com a chave injetada. Sem essa trava, qualquer visitante da tela usaria o worker para alcançar o MinIO, o Postgres ou o metadata da nuvem (SSRF). A validação resolve o DNS e exige `is_global` em todos os IPs, inclusive IPv4 mapeado em IPv6. Ela roda duas vezes, no `POST /jobs` e de novo no worker antes do envio.
 - **Dois endpoints MinIO** (`MINIO_ENDPOINT` interno para API/worker; `MINIO_PUBLIC_ENDPOINT` para o host da URL presigned) — resolve o problema clássico de assinatura S3 em ambiente Docker, onde o nome do serviço interno não resolve do browser. Deixar o público vazio desliga o `output_url` em vez de gerar um link que o cliente não conseguiria abrir.
 - **SQLAlchemy síncrono** — o Celery worker é síncrono e manter o mesmo paradigma na API elimina complexidade de bridges async/sync.

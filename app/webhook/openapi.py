@@ -30,7 +30,7 @@ _PAYLOAD_EXAMPLES: dict[str, Any] = {
             "operation": "pdf.watermark",
             "output_url": None,
             "result_metadata": None,
-            "error_message": "ValueError: 'text' obrigatorio e nao pode ser vazio",
+            "error_message": "'text' obrigatorio e nao pode ser vazio",
             "finished_at": "2026-10-19T14:35:41.087000Z",
         },
     },
@@ -45,22 +45,32 @@ def _description() -> str:
 
     ## Verificando a assinatura
 
-    O header `X-Conversor-Signature` contem `sha256=` seguido do HMAC-SHA256 (hex) do
-    **corpo bruto** da requisicao, usando o segredo `WEBHOOK_SIGNING_SECRET`:
+    Cada envio traz `X-Conversor-Timestamp` (Unix, em segundos) e `X-Conversor-Signature`,
+    com `sha256=` seguido do HMAC-SHA256 (hex) de `"<timestamp>." + corpo bruto`, usando
+    o segredo `WEBHOOK_SIGNING_SECRET`:
 
     ~~~python
-    expected = "sha256=" + hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+    timestamp = request.headers["X-Conversor-Timestamp"]
+    message = timestamp.encode() + b"." + raw_body
+    expected = "sha256=" + hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()
     valido = hmac.compare_digest(expected, request.headers["X-Conversor-Signature"])
+    recente = abs(time.time() - int(timestamp)) <= 300
     ~~~
 
-    Calcule sobre os bytes recebidos, antes de qualquer parse do JSON.
+    Calcule sobre os bytes recebidos, antes de qualquer parse do JSON, e recuse envios
+    fora da janela de 5 minutos. Como a assinatura cobre o timestamp, uma requisicao
+    capturada nao pode ser reenviada mais tarde.
 
     ## Entrega e retry
 
     - Responda com qualquer **2xx** para confirmar o recebimento.
     - **5xx**, timeout ({settings.webhook_timeout_seconds}s) ou erro de rede: nova tentativa
-      com backoff exponencial (1s a 30s), ate {settings.webhook_max_retries} tentativas no total.
+      agendada na fila com espera exponencial (1s a 30s), ate
+      {settings.webhook_max_retries} tentativas no total. Cada tentativa sai com
+      timestamp e assinatura novos.
     - **4xx**: falha definitiva, sem nova tentativa.
+    - Se a resposta 2xx se perder no caminho, a mesma notificacao pode chegar de novo:
+      use o `job_id` para descartar duplicatas.
     """
 
 
@@ -68,7 +78,11 @@ def _job_finished(
         payload: Annotated[WebhookPayload, Body(openapi_examples=_PAYLOAD_EXAMPLES)],
         x_conversor_signature: Annotated[
             str,
-            Header(description="`sha256=` + HMAC-SHA256 hex do corpo bruto"),
+            Header(description="`sha256=` + HMAC-SHA256 hex de `<timestamp>.<corpo bruto>`"),
+        ],
+        x_conversor_timestamp: Annotated[
+            str,
+            Header(description="Unix timestamp (segundos) do envio, coberto pela assinatura"),
         ],
         x_conversor_event: Annotated[
             Literal["job.completed", "job.failed"],

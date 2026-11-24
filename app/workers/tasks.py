@@ -7,10 +7,9 @@ from datetime import datetime, timedelta, timezone
 
 from celery.utils.log import get_task_logger
 from sqlalchemy import and_, or_, select, update
-from sqlalchemy.orm import Session
 
 from app.broker.celery_app import celery_app
-from app.config import Settings, get_settings
+from app.config import get_settings
 from app.database import SessionLocal
 from app.metrics import JOB_PROCESSING_SECONDS, JOBS_FINISHED
 from app.models import Job, JobStatus
@@ -155,7 +154,7 @@ def process_job(job_id: str) -> None:
 
         job = db.get(Job, job_uuid)
         if job is not None and job.callback_url:
-            _deliver_webhook(db, job, settings)
+            deliver_webhook.delay(job_id)
 
 
 @celery_app.task(name="app.workers.tasks.reap_stuck_jobs")
@@ -190,7 +189,7 @@ def reap_stuck_jobs() -> int:
             )
             JOBS_FINISHED.labels(operation=job.operation, status="reaped").inc()
             if job.callback_url:
-                _deliver_webhook(db, job, settings)
+                deliver_webhook.delay(str(job.id))
 
     return len(reaped)
 
@@ -249,56 +248,74 @@ def _public_error_message(exc: Exception) -> str:
     return message
 
 
-def _deliver_webhook(db: Session, job: Job, settings: Settings) -> None:
-    try:
-        validate_callback_url(
-            job.callback_url,
-            allow_private=settings.webhook_allow_private_targets,
+@celery_app.task(
+    bind=True,
+    name="app.workers.tasks.deliver_webhook",
+    ignore_result=True,
+    max_retries=None,
+)
+def deliver_webhook(self, job_id: str) -> None:
+    settings = get_settings()
+
+    with SessionLocal() as db:
+        job = db.get(Job, uuid.UUID(job_id))
+        if job is None or not job.callback_url or job.callback_delivered_at:
+            return
+
+        try:
+            validate_callback_url(
+                job.callback_url,
+                allow_private=settings.webhook_allow_private_targets,
+            )
+        except UnsafeCallbackUrl as exc:
+            logger.warning(
+                "Webhook bloqueado",
+                extra={"job_id": job_id, "reason": str(exc)},
+            )
+            return
+
+        output_url: str | None = None
+        if job.output_key:
+            output_url = presigned_get_url(
+                bucket=settings.minio_bucket_output,
+                key=job.output_key,
+            )
+
+        event = "job.completed" if job.status == JobStatus.DONE else "job.failed"
+        payload = WebhookPayload(
+            event=event,
+            job_id=job.id,
+            status=job.status,
+            operation=job.operation,
+            output_url=output_url,
+            result_metadata=job.result_metadata,
+            error_message=job.error_message,
+            finished_at=job.finished_at or datetime.now(timezone.utc),
         )
-    except UnsafeCallbackUrl as exc:
-        logger.warning(
-            "Webhook bloqueado",
-            extra={"job_id": str(job.id), "reason": str(exc)},
-        )
-        return
 
-    output_url: str | None = None
-    if job.output_key:
-        output_url = presigned_get_url(
-            bucket=settings.minio_bucket_output,
-            key=job.output_key,
-        )
+        job.callback_attempts += 1
+        db.commit()
+        attempts = job.callback_attempts
 
-    event = "job.completed" if job.status == JobStatus.DONE else "job.failed"
-    payload = WebhookPayload(
-        event=event,
-        job_id=job.id,
-        status=job.status,
-        operation=job.operation,
-        output_url=output_url,
-        result_metadata=job.result_metadata,
-        error_message=job.error_message,
-        finished_at=job.finished_at or datetime.now(timezone.utc),
-    )
+        try:
+            notifier.send(job.callback_url, payload)
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            if notifier.is_retryable(exc) and attempts < settings.webhook_max_retries:
+                logger.warning(
+                    "Webhook falhou, nova tentativa agendada",
+                    extra={"job_id": job_id, "attempts": attempts, "error": error},
+                )
+                raise self.retry(exc=exc, countdown=min(2 ** (attempts - 1), 30))
+            logger.warning(
+                "Webhook falhou",
+                extra={"job_id": job_id, "attempts": attempts, "error": error},
+            )
+            return
 
-    delivery = notifier.deliver(job.callback_url, payload)
-
-    job.callback_attempts = delivery.attempts
-    if delivery.delivered:
         job.callback_delivered_at = datetime.now(timezone.utc)
-    db.commit()
-
-    if delivery.delivered:
+        db.commit()
         logger.info(
             "Webhook entregue",
-            extra={"job_id": str(job.id), "attempts": delivery.attempts},
-        )
-    else:
-        logger.warning(
-            "Webhook falhou",
-            extra={
-                "job_id": str(job.id),
-                "attempts": delivery.attempts,
-                "error": str(delivery.error),
-            },
+            extra={"job_id": job_id, "attempts": attempts},
         )

@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import time
 import uuid
 from datetime import datetime, timezone
 
@@ -14,16 +13,13 @@ from app.models import JobStatus
 from app.schemas import WebhookPayload
 from app.webhook import notifier
 
+URL = "https://cb.example.com/hook"
+TIMESTAMP = 1_790_000_000
+
 
 class _FakeSettings:
-    def __init__(
-            self,
-            secret: str = "test-secret",
-            max_retries: int = 3,
-            timeout: int = 5,
-    ):
+    def __init__(self, secret: str = "test-secret", timeout: int = 5):
         self.webhook_signing_secret = secret
-        self.webhook_max_retries = max_retries
         self.webhook_timeout_seconds = timeout
 
 
@@ -64,11 +60,16 @@ def _install_fake_client(monkeypatch, recorder: _HttpxRecorder):
     monkeypatch.setattr(notifier.httpx, "Client", _FakeClient)
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def fake_settings(monkeypatch):
     settings = _FakeSettings()
     monkeypatch.setattr(notifier, "get_settings", lambda: settings)
     return settings
+
+
+@pytest.fixture(autouse=True)
+def _relogio_fixo(monkeypatch):
+    monkeypatch.setattr(notifier, "_now", lambda: TIMESTAMP)
 
 
 @pytest.fixture
@@ -76,11 +77,6 @@ def http(monkeypatch):
     recorder = _HttpxRecorder()
     _install_fake_client(monkeypatch, recorder)
     return recorder
-
-
-@pytest.fixture(autouse=True)
-def _no_sleep(monkeypatch):
-    monkeypatch.setattr(time, "sleep", lambda _: None)
 
 
 def _payload(event: str = "job.completed") -> WebhookPayload:
@@ -95,161 +91,119 @@ def _payload(event: str = "job.completed") -> WebhookPayload:
     )
 
 
-def _ok(url: str = "https://cb.example.com/hook") -> httpx.Response:
-    return httpx.Response(status_code=200, request=httpx.Request("POST", url))
+def _resp(status: int) -> httpx.Response:
+    return httpx.Response(status_code=status, request=httpx.Request("POST", URL))
 
 
-def _resp(status: int, url: str = "https://cb.example.com/hook") -> httpx.Response:
-    return httpx.Response(status_code=status, request=httpx.Request("POST", url))
+def _status_error(status: int) -> httpx.HTTPStatusError:
+    response = _resp(status)
+    return httpx.HTTPStatusError(str(status), request=response.request, response=response)
 
 
-def test_delivery_sucesso_com_200(fake_settings, http):
-    http.queue(_ok())
+def test_send_faz_uma_unica_chamada_com_200(http):
+    http.queue(_resp(200))
 
-    result = notifier.deliver("https://cb.example.com/hook", _payload())
+    notifier.send(URL, _payload())
 
-    assert result.delivered is True
-    assert result.attempts == 1
-    assert result.error is None
+    assert len(http.calls) == 1
+    assert http.calls[0]["url"] == URL
 
 
-def test_body_enviado_e_json_do_payload(fake_settings, http):
-    http.queue(_ok())
-    payload = _payload()
+def test_body_enviado_e_json_do_payload(http):
+    http.queue(_resp(200))
 
-    notifier.deliver("https://cb.example.com/hook", payload)
+    notifier.send(URL, _payload())
 
     sent = json.loads(http.calls[0]["content"].decode("utf-8"))
     assert sent["event"] == "job.completed"
     assert sent["operation"] == "image.thumbnail"
 
 
-def test_assinatura_hmac_correta_no_header(fake_settings, http):
-    http.queue(_ok())
-    payload = _payload()
+def test_assinatura_cobre_timestamp_e_corpo(http):
+    http.queue(_resp(200))
 
-    notifier.deliver("https://cb.example.com/hook", payload)
+    notifier.send(URL, _payload())
+
+    headers = http.calls[0]["headers"]
+    body = http.calls[0]["content"]
+    expected = hmac.new(
+        b"test-secret", f"{TIMESTAMP}.".encode() + body, hashlib.sha256
+    ).hexdigest()
+    assert headers["X-Conversor-Timestamp"] == str(TIMESTAMP)
+    assert headers["X-Conversor-Signature"] == f"sha256={expected}"
+
+
+def test_assinatura_so_do_corpo_nao_vale_mais(http):
+    http.queue(_resp(200))
+
+    notifier.send(URL, _payload())
 
     body = http.calls[0]["content"]
-    expected = hmac.new(b"test-secret", body, hashlib.sha256).hexdigest()
-    assert http.calls[0]["headers"]["X-Conversor-Signature"] == f"sha256={expected}"
+    antiga = hmac.new(b"test-secret", body, hashlib.sha256).hexdigest()
+    assert http.calls[0]["headers"]["X-Conversor-Signature"] != f"sha256={antiga}"
 
 
-def test_header_evento_reflete_payload_event(fake_settings, http):
-    http.queue(_ok())
+def test_header_evento_reflete_payload_event(http):
+    http.queue(_resp(200))
 
-    notifier.deliver("https://cb.example.com/hook", _payload(event="job.failed"))
+    notifier.send(URL, _payload(event="job.failed"))
 
     assert http.calls[0]["headers"]["X-Conversor-Event"] == "job.failed"
 
 
-def test_content_type_application_json(fake_settings, http):
-    http.queue(_ok())
+def test_content_type_application_json(http):
+    http.queue(_resp(200))
 
-    notifier.deliver("https://cb.example.com/hook", _payload())
+    notifier.send(URL, _payload())
 
     assert http.calls[0]["headers"]["Content-Type"] == "application/json"
 
 
-def test_user_agent_customizado(fake_settings, http):
-    http.queue(_ok())
+def test_user_agent_customizado(http):
+    http.queue(_resp(200))
 
-    notifier.deliver("https://cb.example.com/hook", _payload())
+    notifier.send(URL, _payload())
 
     assert "ConversorArquivos-Webhook" in http.calls[0]["headers"]["User-Agent"]
 
 
-def test_500_retenta_ate_max_retries_e_falha(fake_settings, http):
-    http.queue(_resp(500), _resp(500), _resp(500))
+@pytest.mark.parametrize("status", [400, 404, 500, 503])
+def test_status_de_erro_levanta_http_status_error(http, status):
+    http.queue(_resp(status))
 
-    result = notifier.deliver("https://cb.example.com/hook", _payload())
+    with pytest.raises(httpx.HTTPStatusError):
+        notifier.send(URL, _payload())
 
-    assert result.delivered is False
-    assert result.attempts == 3
-    assert "500" in result.error
-
-
-def test_500_seguido_de_200_sucesso_em_2_tentativas(fake_settings, http):
-    http.queue(_resp(500), _ok())
-
-    result = notifier.deliver("https://cb.example.com/hook", _payload())
-
-    assert result.delivered is True
-    assert result.attempts == 2
-    assert result.error is None
+    assert len(http.calls) == 1
 
 
-def test_network_error_retenta(fake_settings, http):
-    http.queue(
-        httpx.ConnectError("kaboom", request=httpx.Request("POST", "https://x")),
-        _ok(),
-    )
-
-    result = notifier.deliver("https://cb.example.com/hook", _payload())
-
-    assert result.delivered is True
-    assert result.attempts == 2
-
-
-def test_timeout_retenta(fake_settings, http):
-    http.queue(
-        httpx.ConnectTimeout("slow", request=httpx.Request("POST", "https://x")),
-        _ok(),
-    )
-
-    result = notifier.deliver("https://cb.example.com/hook", _payload())
-
-    assert result.delivered is True
-    assert result.attempts == 2
-
-
-def test_400_nao_retenta(fake_settings, http):
-    http.queue(_resp(400))
-
-    result = notifier.deliver("https://cb.example.com/hook", _payload())
-
-    assert result.delivered is False
-    assert result.attempts == 1
-    assert "400" in result.error
-
-
-def test_404_nao_retenta(fake_settings, http):
-    http.queue(_resp(404))
-
-    result = notifier.deliver("https://cb.example.com/hook", _payload())
-
-    assert result.delivered is False
-    assert result.attempts == 1
-    assert "404" in result.error
-
-
-def test_falha_retorna_error_com_tipo_e_mensagem(fake_settings, http):
-    http.queue(_resp(500), _resp(500), _resp(500))
-
-    result = notifier.deliver("https://cb.example.com/hook", _payload())
-
-    assert result.error is not None
-    assert "HTTPStatusError" in result.error
-
-
-def test_sucesso_zera_error_field(fake_settings, http):
-    http.queue(_resp(500), _ok())
-
-    result = notifier.deliver("https://cb.example.com/hook", _payload())
-
-    assert result.error is None
+@pytest.mark.parametrize(
+    ("exc", "esperado"),
+    [
+        (_status_error(500), True),
+        (_status_error(503), True),
+        (_status_error(400), False),
+        (_status_error(404), False),
+        (httpx.ConnectError("kaboom", request=httpx.Request("POST", URL)), True),
+        (httpx.ConnectTimeout("slow", request=httpx.Request("POST", URL)), True),
+        (ValueError("outro erro"), False),
+    ],
+)
+def test_is_retryable(exc, esperado):
+    assert notifier.is_retryable(exc) is esperado
 
 
 def test_sign_produz_hmac_sha256_hex():
-    signature = notifier._sign(b"hello", "secret")
+    signature = notifier._sign(b"hello", 123, "secret")
 
-    expected = hmac.new(b"secret", b"hello", hashlib.sha256).hexdigest()
+    expected = hmac.new(b"secret", b"123.hello", hashlib.sha256).hexdigest()
     assert signature == expected
     assert len(signature) == 64
 
 
 def test_assinatura_muda_quando_secret_muda():
-    a = notifier._sign(b"payload", "secret-a")
-    b = notifier._sign(b"payload", "secret-b")
+    assert notifier._sign(b"payload", 1, "secret-a") != notifier._sign(b"payload", 1, "secret-b")
 
-    assert a != b
+
+def test_assinatura_muda_quando_timestamp_muda():
+    assert notifier._sign(b"payload", 1, "secret") != notifier._sign(b"payload", 2, "secret")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 from app.config import get_settings
 from app.database import SessionLocal
@@ -70,12 +71,12 @@ def test_reaper_preserva_jobs_recentes_e_finalizados():
     assert _load_job(done).status == JobStatus.DONE
 
 
-def test_reaper_notifica_webhook_do_job_encerrado(monkeypatch):
-    delivered = []
+def test_reaper_enfileira_webhook_do_job_encerrado(monkeypatch):
+    enfileirados = []
     monkeypatch.setattr(
         tasks,
-        "_deliver_webhook",
-        lambda db, job, settings: delivered.append((job.id, job.status)),
+        "deliver_webhook",
+        SimpleNamespace(delay=enfileirados.append),
     )
     job_id = _create_job(
         JobStatus.PROCESSING,
@@ -86,7 +87,8 @@ def test_reaper_notifica_webhook_do_job_encerrado(monkeypatch):
 
     assert tasks.reap_stuck_jobs() == 2
 
-    assert delivered == [(job_id, JobStatus.FAILED)]
+    assert enfileirados == [str(job_id)]
+    assert _load_job(job_id).status == JobStatus.FAILED
 
 
 def test_process_job_ignora_job_ja_encerrado_pelo_reaper(monkeypatch):
