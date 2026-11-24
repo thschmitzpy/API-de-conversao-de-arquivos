@@ -125,9 +125,10 @@ def test_list_jobs_order_asc(client: TestClient) -> None:
     assert returned == [str(i) for i in ids]
 
 
-def test_list_jobs_order_invalido_retorna_400(client: TestClient) -> None:
+def test_list_jobs_order_invalido_retorna_422(client: TestClient) -> None:
     resp = client.get("/jobs", params={"order": "banana"})
-    assert resp.status_code == 400
+    assert resp.status_code == 422
+    assert resp.json()["detail"][0]["loc"] == ["query", "order"]
 
 
 def test_list_jobs_limit_fora_do_range_retorna_422(client: TestClient) -> None:

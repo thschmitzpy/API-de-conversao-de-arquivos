@@ -4,7 +4,7 @@ import re
 import uuid
 from datetime import timedelta
 from pathlib import PurePosixPath, PureWindowsPath
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import quote
 
 from fastapi import (
@@ -259,7 +259,7 @@ def create_job(
     )
 
 
-_ALLOWED_ORDERS = {"created_at:desc", "created_at:asc"}
+JobOrder = Literal["created_at:desc", "created_at:asc"]
 
 
 @router.get(
@@ -267,12 +267,6 @@ _ALLOWED_ORDERS = {"created_at:desc", "created_at:asc"}
     response_model=JobListResponse,
     name="list_jobs",
     summary="Lista jobs com paginacao e filtros",
-    responses={
-        400: _error(
-            "Valor de order nao suportado",
-            "order invalido. Aceitos: ['created_at:asc', 'created_at:desc']",
-        ),
-    },
 )
 @limiter.limit(get_settings().rate_limit_get_job)
 def list_jobs(
@@ -293,17 +287,11 @@ def list_jobs(
             int, Query(ge=0, description="Offset a partir do inicio")
         ] = 0,
         order: Annotated[
-            str,
-            Query(description="Ordenacao: created_at:desc (default) ou created_at:asc"),
+            JobOrder,
+            Query(description="Ordenacao por data de criacao"),
         ] = "created_at:desc",
         db: Session = Depends(get_db),
 ) -> JobListResponse:
-    if order not in _ALLOWED_ORDERS:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            f"order invalido. Aceitos: {sorted(_ALLOWED_ORDERS)}",
-        )
-
     stmt = select(Job)
     count_stmt = select(func.count()).select_from(Job)
 
@@ -311,7 +299,7 @@ def list_jobs(
         stmt = stmt.where(Job.status.in_(status_))
         count_stmt = count_stmt.where(Job.status.in_(status_))
     if operation:
-        stmt = stmt.where(Job.operation == operation)
+        stmt = stmt.where(Job.operation == operation.value)
         count_stmt = count_stmt.where(Job.operation == operation.value)
 
     if order == "created_at:desc":
@@ -348,22 +336,22 @@ def get_job(
     if job is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Job nao encontrado")
 
-    response = JobStatusResponse.model_validate(job)
+    body = JobStatusResponse.model_validate(job)
     settings = get_settings()
 
     if job.finished_at:
-        response.expires_at = job.finished_at + timedelta(hours=settings.file_retention_hours)
+        body.expires_at = job.finished_at + timedelta(hours=settings.file_retention_hours)
 
     if job.output_key and job.files_purged_at is None:
-        response.download_url = str(
+        body.download_url = str(
             request.url_for("download_job_output", job_id=job.id)
         )
-        response.output_url = presigned_get_url(
+        body.output_url = presigned_get_url(
             bucket=settings.minio_bucket_output,
             key=job.output_key,
         )
 
-    return response
+    return body
 
 
 def _download_filename(job: Job) -> str:

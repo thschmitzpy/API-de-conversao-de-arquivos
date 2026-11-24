@@ -50,8 +50,8 @@ def _check_postgres() -> str:
 def _check_redis() -> str:
     settings = get_settings()
     try:
-        client = Redis.from_url(settings.celery_broker_url, socket_timeout=2)
-        client.ping()
+        with Redis.from_url(settings.celery_broker_url, socket_timeout=2) as client:
+            client.ping()
         return "ok"
     except (RedisError, OSError) as exc:
         return f"error: {exc.__class__.__name__}"

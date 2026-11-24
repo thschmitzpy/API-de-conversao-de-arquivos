@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
+
+from app.api.health import _check_redis
 
 
 def test_health_sempre_retorna_ok(client: TestClient) -> None:
@@ -57,3 +59,14 @@ def test_ready_com_todos_caidos_retorna_503_com_cada_erro(
     data = r.json()
     assert data["status"] == "unavailable"
     assert all(v.startswith("error:") for v in data["checks"].values())
+
+
+def test_check_redis_fecha_a_conexao() -> None:
+    client = MagicMock()
+    client.__enter__.return_value = client
+
+    with patch("app.api.health.Redis.from_url", return_value=client):
+        assert _check_redis() == "ok"
+
+    client.ping.assert_called_once()
+    client.__exit__.assert_called_once()
