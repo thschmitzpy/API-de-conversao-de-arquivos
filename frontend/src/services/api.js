@@ -32,19 +32,26 @@ export function mensagemDeErro(erro) {
   const detail = erro.response?.data?.detail;
 
   if (!erro.response) {
-    return 'Não foi possível falar com a API. Ela está de pé?';
+      return 'Sem resposta do servidor. Confira sua conexão e tente de novo.';
+    }
+    if (status === 429) {
+      return 'Muitas requisições em pouco tempo. Aguarde um minuto e tente de novo.';
+    }
+    if (status === 401 || status === 403) {
+      return 'O front não está autorizado na API (confira a CONVERSOR_API_KEY).';
+    }
+    if (status === 404) {
+      return 'Esta conversão não foi encontrada. Ela pode ter sido removida.';
+    }
+    if (status === 413) {
+      return 'O arquivo passa do limite de envio do servidor.';
+    }
+    // Nos 5xx o detail é interno (storage, fila) ou nem existe (página de erro do nginx).
+    if (status >= 500) {
+      return 'O servidor está com problemas no momento. Tente de novo em instantes.';
+    }
+    if (typeof detail === 'string') {
+      return detail;
+    }
+    return `A requisição foi recusada (HTTP ${status}).`;
   }
-  if (status === 429) {
-    return 'Muitas requisições em pouco tempo. Aguarde um minuto e tente de novo.';
-  }
-  if (status === 401 || status === 403) {
-    return 'O front não está autorizado na API (confira a CONVERSOR_API_KEY).';
-  }
-  if (typeof detail === 'string') {
-    return detail;
-  }
-  if (Array.isArray(detail)) {
-    return detail.map((item) => item.msg).join('; ');
-  }
-  return `Erro inesperado (HTTP ${status}).`;
-}

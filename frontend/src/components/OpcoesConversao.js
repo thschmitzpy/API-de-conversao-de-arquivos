@@ -31,15 +31,14 @@ export default function OpcoesConversao({
     <form className="painel" onSubmit={aoEnviar}>
       <h2>O que fazer com o arquivo?</h2>
 
-      <div className="opcoes" role="radiogroup" aria-label="Conversões disponíveis">
+      <div className="opcoes" role="group" aria-label="Conversões disponíveis">
         {opcoes.map((opcao) => {
           const ativa = selecionada?.id === opcao.id;
           return (
             <button
               key={opcao.id}
               type="button"
-              role="radio"
-              aria-checked={ativa}
+              aria-pressed={ativa}
               className={ativa ? 'opcao opcao--ativa' : 'opcao'}
               onClick={() => onSelecionar(opcao)}
             >

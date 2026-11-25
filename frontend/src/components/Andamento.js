@@ -1,11 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import useJobPolling from '../hooks/useJobPolling';
 import { formatarDuracao, formatarExpiracao } from '../formatar';
-import { urlDownload } from '../services/api';
+import BotaoDownload from './BotaoDownload';
 
 const ETAPAS = ['Envio', 'Na fila', 'Processando', 'Pronto'];
 
 const MAX_TIMEOUT_MS = 2 ** 31 - 1;
+
+// Lido pelo leitor de tela só na troca de etapa, não a cada % do envio.
+const ANUNCIOS = ['Enviando o arquivo.', 'Na fila de processamento.', 'Convertendo o arquivo.'];
 
 function etapaAtual(jobId, job) {
   if (!jobId) {
@@ -32,7 +35,7 @@ function classeEtapa(indice, atual, falhou, concluido) {
 
 export default function Andamento({
   nomeArquivo,
-  titulo,
+  titulo: tituloOpcao,
   progresso,
   jobId,
   erroEnvio,
@@ -40,6 +43,11 @@ export default function Andamento({
   onRecomecar,
 }) {
   const { job, erro: erroConsulta, consultarDeNovo } = useJobPolling(jobId);
+  const titulo = useRef(null);
+
+  useEffect(() => {
+    titulo.current.focus();
+  }, []);
 
   const erroJob = job?.status === 'FAILED' ? job.error_message || 'O processamento falhou.' : null;
   const falha = erroEnvio || erroConsulta || erroJob;
@@ -77,17 +85,28 @@ export default function Andamento({
 
   const expirou = prazoVencido || Boolean(job?.files_purged_at);
   const validade = formatarExpiracao(expiraEm);
+  const anuncio = falha ? '' : concluido ? 'Conversão pronta para baixar.' : ANUNCIOS[etapa];
 
   return (
-    <section className="painel andamento" aria-live="polite">
+    <section className="painel andamento">
       <header className="andamento__cabecalho">
-        <strong title={nomeArquivo}>{nomeArquivo}</strong>
-        <span>{titulo}</span>
+        <h2 ref={titulo} tabIndex={-1} title={nomeArquivo}>
+          {nomeArquivo}
+        </h2>
+        <span>{tituloOpcao}</span>
       </header>
+
+      <p className="visualmente-oculto" role="status">
+        {anuncio}
+      </p>
 
       <ol className="etapas">
         {ETAPAS.map((nome, indice) => (
-          <li key={nome} className={classeEtapa(indice, etapa, Boolean(falha), concluido)}>
+          <li
+            key={nome}
+            className={classeEtapa(indice, etapa, Boolean(falha), concluido)}
+            aria-current={indice === etapa && !concluido ? 'step' : undefined}
+          >
             {nome}
           </li>
         ))}
@@ -133,9 +152,7 @@ export default function Andamento({
             </div>
           ) : (
             <>
-              <a className="botao botao--primario" href={urlDownload(jobId)} download>
-                Baixar resultado
-              </a>
+              <BotaoDownload jobId={jobId} onExpirado={() => setPrazoVencido(true)} />
               {validade && (
                 <div className="andamento__validade">Disponível para download até {validade}.</div>
               )}

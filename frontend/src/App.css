@@ -4,11 +4,13 @@
   --borda: #dde3ee;
   --texto: #1c2333;
   --texto-suave: #5b6478;
-  --primaria: #2f6fed;
-  --primaria-hover: #1f56c4;
+  --borda-campo: #7b8599;
+  --primaria: #245fd6;
+  --primaria-hover: #1a4bb0;
   --primaria-suave: #e8f0fe;
-  --sucesso: #1f9d55;
-  --erro: #d64545;
+  --texto-na-primaria: #ffffff;
+  --sucesso: #17804a;
+  --erro: #b42318;
   --erro-suave: #fdecec;
   --raio: 12px;
   --sombra: 0 1px 2px rgba(16, 24, 40, 0.06), 0 4px 16px rgba(16, 24, 40, 0.06);
@@ -22,9 +24,11 @@
     --borda: #2a3447;
     --texto: #e6e9f0;
     --texto-suave: #9aa4b8;
-    --primaria: #4f7ff0;
-    --primaria-hover: #3d6ad6;
+    --borda-campo: #66718c;
+    --primaria: #6e96f5;
+    --primaria-hover: #8eadf8;
     --primaria-suave: #1c2a4a;
+    --texto-na-primaria: #0f1420;
     --sucesso: #3ccf7f;
     --erro: #ff6b6b;
     --erro-suave: #3a1f24;
@@ -34,6 +38,23 @@
 
 * {
   box-sizing: border-box;
+}
+
+:focus-visible {
+  outline: 2px solid var(--primaria);
+  outline-offset: 2px;
+}
+
+.visualmente-oculto {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 body {
@@ -243,16 +264,11 @@ body {
 
 .campo input {
   padding: 10px 12px;
-  border: 1px solid var(--borda);
+  border: 1px solid var(--borda-campo);
   border-radius: 8px;
   background: var(--fundo);
   color: inherit;
   font: inherit;
-}
-
-.campo input:focus {
-  outline: 2px solid var(--primaria);
-  outline-offset: 1px;
 }
 
 /* Botoes */
@@ -273,7 +289,7 @@ body {
 .botao--primario {
   align-self: flex-start;
   background: var(--primaria);
-  color: #ffffff;
+  color: var(--texto-na-primaria);
 }
 
 .botao--primario:hover:not(:disabled) {
@@ -310,7 +326,7 @@ body {
   min-width: 0;
 }
 
-.andamento__cabecalho strong {
+.andamento__cabecalho h2 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

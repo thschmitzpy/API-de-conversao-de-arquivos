@@ -34,7 +34,7 @@ test("marca d'agua sem texto nao deixa converter", () => {
 
 test('clicar num card informa a opcao escolhida', () => {
   const { onSelecionar } = renderizar();
-  fireEvent.click(screen.getByRole('radio', { name: /Extrair texto \(OCR\)/ }));
+  fireEvent.click(screen.getByRole('button', { name: /Extrair texto \(OCR\)/ }));
   expect(onSelecionar).toHaveBeenCalledWith(expect.objectContaining({ operation: 'ocr.extract' }));
 });
 
