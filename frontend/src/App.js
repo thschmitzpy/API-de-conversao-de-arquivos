@@ -8,12 +8,18 @@ import { formatarBytes } from './formatar';
 import useBloquearDrop from './hooks/useBloquearDrop';
 import { criarJob, mensagemDeErro } from './services/api';
 import { carregarLimiteUpload } from './services/config';
+import { carregarJob, esquecerJob, salvarJob } from './services/jobSalvo';
+
+function envioRestaurado() {
+  const salvo = carregarJob();
+  return salvo ? { ...salvo, progresso: 100, erro: null } : null;
+}
 
 export default function App() {
   const [arquivo, setArquivo] = useState(null);
   const [opcao, setOpcao] = useState(null);
   const [valores, setValores] = useState({});
-  const [envio, setEnvio] = useState(null);
+  const [envio, setEnvio] = useState(envioRestaurado);
   const [limiteBytes, setLimiteBytes] = useState(LIMITE_UPLOAD_BYTES);
 
   useBloquearDrop();
@@ -37,18 +43,26 @@ export default function App() {
   }
 
   async function converter() {
-    setEnvio({ progresso: 0, jobId: null, erro: null });
+    const descricao = { nomeArquivo: arquivo.name, titulo: opcao.titulo };
+    setEnvio({ ...descricao, progresso: 0, jobId: null, erro: null });
     try {
       const criado = await criarJob(arquivo, opcao.operation, opcao.parametros(valores), (progresso) =>
         setEnvio((atual) => ({ ...atual, progresso }))
       );
+      salvarJob({ ...descricao, jobId: criado.id });
       setEnvio((atual) => ({ ...atual, progresso: 100, jobId: criado.id }));
     } catch (erro) {
       setEnvio((atual) => ({ ...atual, erro: mensagemDeErro(erro) }));
     }
   }
 
+  function voltarAoArquivo() {
+    esquecerJob();
+    setEnvio(null);
+  }
+
   function recomecar() {
+    esquecerJob();
     setArquivo(null);
     setOpcao(null);
     setValores({});
@@ -68,12 +82,12 @@ export default function App() {
       <main className="conteudo">
         {envio ? (
           <Andamento
-            arquivo={arquivo}
-            opcao={opcao}
+            nomeArquivo={envio.nomeArquivo}
+            titulo={envio.titulo}
             progresso={envio.progresso}
             jobId={envio.jobId}
             erroEnvio={envio.erro}
-            onTentarDeNovo={() => setEnvio(null)}
+            onVoltarAoArquivo={arquivo ? voltarAoArquivo : null}
             onRecomecar={recomecar}
           />
         ) : (

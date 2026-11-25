@@ -59,3 +59,22 @@ test('desiste com erro claro quando o job nunca termina', async () => {
   expect(result.current.erro).toMatch(/demorando mais que o esperado/);
   expect(consultarJob).toHaveBeenCalledTimes(chamadas);
 });
+
+test('consultarDeNovo retoma a consulta depois de um erro', async () => {
+  consultarJob
+      .mockRejectedValueOnce({response: {status: 404}})
+      .mockResolvedValue({status: 'DONE'});
+
+  const {result} = renderHook(() => useJobPolling('abc'));
+  await avancar(3000);
+  expect(result.current.erro).toBe('erro da API');
+
+  await act(async () => {
+    result.current.consultarDeNovo();
+  });
+  await avancar(3000);
+
+  expect(result.current.erro).toBeNull();
+  expect(result.current.job.status).toBe('DONE');
+  expect(consultarJob).toHaveBeenCalledTimes(2);
+});

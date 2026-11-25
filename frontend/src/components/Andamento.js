@@ -31,15 +31,15 @@ function classeEtapa(indice, atual, falhou, concluido) {
 }
 
 export default function Andamento({
-  arquivo,
-  opcao,
+  nomeArquivo,
+  titulo,
   progresso,
   jobId,
   erroEnvio,
-  onTentarDeNovo,
+  onVoltarAoArquivo,
   onRecomecar,
 }) {
-  const { job, erro: erroConsulta } = useJobPolling(jobId);
+  const { job, erro: erroConsulta, consultarDeNovo } = useJobPolling(jobId);
 
   const erroJob = job?.status === 'FAILED' ? job.error_message || 'O processamento falhou.' : null;
   const falha = erroEnvio || erroConsulta || erroJob;
@@ -81,8 +81,8 @@ export default function Andamento({
   return (
     <section className="painel andamento" aria-live="polite">
       <header className="andamento__cabecalho">
-        <strong title={arquivo.name}>{arquivo.name}</strong>
-        <span>{opcao.titulo}</span>
+        <strong title={nomeArquivo}>{nomeArquivo}</strong>
+        <span>{titulo}</span>
       </header>
 
       <ol className="etapas">
@@ -146,9 +146,14 @@ export default function Andamento({
 
       {!emAndamento && (
         <div className="acoes">
-          {falha && (
-            <button type="button" className="botao botao--secundario" onClick={onTentarDeNovo}>
-              Ajustar e tentar de novo
+          {erroConsulta && (
+            <button type="button" className="botao botao--secundario" onClick={consultarDeNovo}>
+              Consultar de novo
+            </button>
+          )}
+          {onVoltarAoArquivo && !erroConsulta && (
+            <button type="button" className="botao botao--secundario" onClick={onVoltarAoArquivo}>
+              {concluido ? 'Outra conversão deste arquivo' : 'Ajustar e tentar de novo'}
             </button>
           )}
           <button type="button" className="botao botao--secundario" onClick={onRecomecar}>

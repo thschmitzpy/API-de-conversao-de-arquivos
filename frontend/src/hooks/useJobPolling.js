@@ -12,11 +12,14 @@ const STATUS_FINAIS = ['DONE', 'FAILED'];
 export default function useJobPolling(jobId) {
   const [job, setJob] = useState(null);
   const [erro, setErro] = useState(null);
+  const [tentativa, setTentativa] = useState(0);
 
   useEffect(() => {
     if (!jobId) {
       return undefined;
     }
+
+    setErro(null);
 
     const controle = new AbortController();
     let timer = null;
@@ -57,7 +60,11 @@ export default function useJobPolling(jobId) {
       controle.abort();
       clearTimeout(timer);
     };
-  }, [jobId]);
+  }, [jobId, tentativa]);
 
-  return { job, erro };
+  function consultarDeNovo() {
+    setTentativa((atual) => atual + 1);
+  }
+
+  return {job, erro, consultarDeNovo};
 }
