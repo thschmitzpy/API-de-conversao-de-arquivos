@@ -55,7 +55,7 @@ Fluxo:
 
 1. Cliente envia arquivo + `operation` + `parameters` (JSON) → `POST /jobs`.
 2. API valida tamanho/formato, salva o input no MinIO, cria a linha em `jobs` e enfileira a task Celery. Devolve `202 Accepted` com `job_id` e `status_url`.
-3. Worker consome a fila, baixa o input, chama o processor correspondente e salva o output no MinIO.
+3. Worker consome a fila, baixa o input, chama o processor correspondente e salva o output no MinIO. Em vídeo e áudio, grava em `progress` a porcentagem informada pelo FFmpeg enquanto converte.
 4. Worker atualiza o `Job` no Postgres (status, `output_key`, `result_metadata`, `finished_at`).
 5. Se o cliente informou `callback_url`, o worker enfileira a task `deliver_webhook`, que envia o resultado assinado com HMAC-SHA256 (retry exponencial pela fila).
 6. Cliente consulta `GET /jobs/{id}`. Com o job em `DONE`, a resposta traz `download_url`, que aponta para `GET /jobs/{id}/download` e entrega o arquivo pela própria API. Esse é o caminho que o frontend usa. Quando `MINIO_PUBLIC_ENDPOINT` está definido, a resposta também traz `output_url`, um link presigned para baixar direto do storage.
@@ -76,6 +76,8 @@ Fluxo:
 | `audio.extract` | áudio (MP3 / WAV / OGG / AAC / M4A / FLAC) ou vídeo | MP3 / WAV / OGG / AAC | `format`, `bitrate`, `sample_rate`, `channels` |
 | `ocr.extract` | PDF ou imagem (PNG/JPEG/WEBP/GIF) | TXT ou JSON | `lang` (`eng`, `por`, `por+eng`, …), `output_format` (`text` ou `json`), `dpi` (72-600, só para PDF) |
 | `document.convert` | DOCX / DOC / ODT / RTF / XLSX / XLS / ODS / PPTX / PPT / ODP | PDF | — (formato detectado pelo conteúdo, não pela extensão) |
+
+Progresso: `video.transcode` e `audio.extract` informam a porcentagem da conversão no campo `progress` do `GET /jobs/{id}` enquanto o job está em `PROCESSING`, e a tela troca o spinner por uma barra. Nas demais operações, e enquanto o job está na fila, o campo vem `null`.
 
 Limite de upload: **100 MB** por job (`MAX_UPLOAD_MB`). A API, o nginx do front e a tela leem a mesma variável; o front busca o valor em `/config.json`, que o nginx gera no boot, então mudar o limite não exige rebuild.
 
@@ -231,6 +233,7 @@ Resposta (job concluído):
   "id": "9a7b1c2d-...",
   "status": "DONE",
   "operation": "image.thumbnail",
+  "progress": null,
   "input_filename": "foto.jpg",
   "download_url": "http://localhost:8000/jobs/9a7b1c2d-.../download",
   "output_url": "http://localhost:9000/outputs/9a7b.../output.webp?X-Amz-Signature=...",
@@ -243,6 +246,8 @@ Resposta (job concluído):
 ```
 
 O `download_url` vem sempre que há resultado disponível. O `output_url` só aparece com `MINIO_PUBLIC_ENDPOINT` definido (no compose de dev ele é `localhost:9000`); sem ele, o campo vem `null`, inclusive no payload do webhook.
+
+Durante um `video.transcode`, a mesma consulta devolve `"status": "PROCESSING"` e `"progress": 42`, por exemplo. O valor é atualizado no máximo uma vez por segundo e vai a `100` quando o job termina.
 
 ### 3. Listar jobs com filtros
 
@@ -341,7 +346,8 @@ Processors sem FFmpeg + webhook + rate limit + integração (container `api`):
 ```bash
 docker compose run --rm --no-deps --entrypoint="" api pytest tests/ -v \
   --ignore=tests/processors/test_video_transcode.py \
-  --ignore=tests/processors/test_audio_extract.py
+  --ignore=tests/processors/test_audio_extract.py \
+  --ignore=tests/processors/test_ffmpeg_progress.py
 ```
 
 Processors que dependem de binários de sistema — FFmpeg, Tesseract e LibreOffice (container `worker`):
@@ -350,13 +356,14 @@ Processors que dependem de binários de sistema — FFmpeg, Tesseract e LibreOff
 docker compose run --rm --no-deps --entrypoint="" worker pytest \
   tests/processors/test_video_transcode.py \
   tests/processors/test_audio_extract.py \
+  tests/processors/test_ffmpeg_progress.py \
   tests/processors/test_ocr_extract.py \
   tests/processors/test_document_convert.py -v
 ```
 
 > No PowerShell, use `--entrypoint=""` com o sinal de igual — sem ele o PS descarta a string vazia.
 
-Cobertura atual: **250+ testes** em 26 suites — processors (unit), webhook (com e sem retry), rate limit, reaper de jobs presos, retenção de arquivos e integração end-to-end (POST → worker → GET → MinIO).
+Cobertura atual: **370+ testes** em 32 suites — processors (unit), progresso do FFmpeg, webhook (com e sem retry), rate limit, reaper de jobs presos, retenção de arquivos e integração end-to-end (POST → worker → GET → MinIO).
 
 Frontend (Node 22):
 
@@ -394,7 +401,7 @@ app/
 ├── broker/           Fábrica da app Celery
 ├── storage/          Cliente MinIO (upload, presigned, ensure_buckets)
 ├── webhook/          Notifier HMAC com timestamp, guarda de URL, docs do webhook
-├── workers/          Celery tasks + processors
+├── workers/          Celery tasks + processors + reporte de progresso
 │   └── processors/   image, csv, excel, pdf (extract/merge/watermark), video, audio, ocr, document
 ├── auth.py           Validação do header X-API-Key
 ├── config.py         Settings via pydantic-settings
@@ -448,6 +455,7 @@ tests/
 - **Retenção de 24 h com limpeza periódica** — sem prazo, o MinIO cresceria para sempre com arquivos que ninguém vai baixar de novo. A cada 15 min, uma task do beat pega até 200 jobs finalizados há mais de 24 h e apaga a entrada e o resultado; só depois disso marca `files_purged_at`. Se o MinIO cair no meio, o lote para e esses jobs voltam na rodada seguinte, então nenhum fica marcado com o arquivo ainda lá. Um índice parcial (`WHERE files_purged_at IS NULL`) mantém a busca barata mesmo com o histórico crescendo. A linha do job continua no banco: o histórico e as métricas não se perdem, só os arquivos.
 - **Mensagem de erro sem detalhe interno** — o `error_message` vai para o frontend e para o webhook, então só passam as mensagens que os processors escrevem para erro de entrada ou de parâmetro (`ValueError`), com caminhos absolutos trocados por `<arquivo>` e corte em 300 caracteres. Falhas de storage, de banco ou bugs viram uma mensagem genérica, e o traceback completo fica só no log JSON, junto do `job_id`.
 - **Limites de recurso nos processors** — um arquivo pequeno pode virar gigabytes na memória do worker: um ZIP de 100 MB descompactado, uma imagem com dimensões absurdas, um PDF renderizado a 600 dpi. Antes de ler, o worker soma o tamanho declarado de cada membro do ZIP (o Python nunca descompacta além disso) e confere os pixels da imagem ou da página, então o arquivo hostil vira um `FAILED` com mensagem clara em vez de derrubar o worker por falta de memória. O FFmpeg roda com `-protocol_whitelist file` e `-format_whitelist` restrito aos containers de áudio e vídeo aceitos: sem isso ele abre qualquer formato que reconhecer, inclusive listas `concat` que apontam para outros arquivos, e chegava a transcodificar um PNG para MP4.
+- **Progresso do FFmpeg sem acoplar processor e banco** — antes de converter, o `ffprobe` lê a duração; o FFmpeg roda com `-progress pipe:1` e a porcentagem sai de `out_time_us ÷ duração`. O processor só chama `report_progress()`, e quem decide o destino é a task, por um `ContextVar`: nenhum processor mudou de assinatura, e o OCR pode reportar por página com o mesmo mecanismo. A task grava no máximo uma vez por segundo e só quando o número sobe, com `WHERE status = 'PROCESSING'` para não reescrever um job que o reaper já encerrou. Falha ao gravar só gera um aviso no log, sem derrubar a conversão. O stderr do FFmpeg vai para um arquivo temporário: com os dois em `PIPE`, um log grande encheria o buffer e travaria o processo enquanto o worker lê só o stdout.
 - **Containers sem root** — API, worker e beat rodam com o UID 10001, e o frontend usa a variante `nginx-unprivileged` (UID 101, porta 8080). O código em `/code` continua do root, então o processo não consegue alterá-lo. No Kubernetes, `runAsNonRoot`, `allowPrivilegeEscalation: false` e `drop: ["ALL"]` fazem o cluster recusar o pod se a imagem voltar a rodar como root.
 - **`poetry.lock` versionado** — as imagens da API e do worker e o CI instalam exatamente as mesmas versões. Sem o lock, cada build resolvia os `^` do `pyproject.toml` na hora, e duas imagens buildadas em dias diferentes podiam divergir sem nenhuma mudança no código. O `COPY` dos Dockerfiles exige o arquivo, e o job `lint` reprova o push se o `pyproject.toml` mudar sem o lock acompanhar. Atualizar dependência vira um diff revisável.
 - **Cobertura com piso medido, não chutado** — o CI é o único lugar onde a suíte inteira roda num processo só, com todos os binários dos processors, então o número de referência vem de lá (92% com branch coverage, que conta os dois lados de cada `if`). O piso de 90% deixa folga para refactors e reprova código novo sem teste. O código executado pelo worker Celery em background não entra na medição, mas processors e tasks também são chamados direto pelos testes.
