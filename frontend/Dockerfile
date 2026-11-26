@@ -5,7 +5,8 @@ COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY public ./public
 COPY src ./src
-RUN npm run build
+# CI=true faz warning de lint (inclusive de acessibilidade) reprovar o build.
+RUN CI=true npm run build
 
 
 FROM nginxinc/nginx-unprivileged:stable-alpine
