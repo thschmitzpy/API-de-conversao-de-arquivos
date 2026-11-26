@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import subprocess
 import tempfile
 import time
 from io import BytesIO
@@ -8,9 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from app.workers.processors.base import (
-    FFMPEG_INPUT_OPTIONS,
     ProcessorResult,
-    ffmpeg_error_message,
+    run_ffmpeg,
 )
 
 VIDEO_TIMEOUT_SECONDS = 300
@@ -55,38 +53,21 @@ def transcode(
         out_path = Path(tmpdir) / f"output.{fmt}"
         in_path.write_bytes(input_stream.getvalue())
 
-        cmd = [
-            "ffmpeg", "-y",
-            *FFMPEG_INPUT_OPTIONS,
-            "-i", str(in_path),
+        output_args = [
             "-c:v", video_codec,
             "-crf", str(crf),
         ]
         if resolution is not None:
-            cmd += ["-vf", f"scale={_ALLOWED_RESOLUTIONS[resolution]}"]
+            output_args += ["-vf", f"scale={_ALLOWED_RESOLUTIONS[resolution]}"]
         if strip_audio:
-            cmd += ["-an"]
+            output_args += ["-an"]
         else:
-            cmd += ["-c:a", audio_codec]
-        cmd += [str(out_path)]
+            output_args += ["-c:a", audio_codec]
+        output_args += [str(out_path)]
 
         started = time.monotonic()
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=VIDEO_TIMEOUT_SECONDS,
-                check=False,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise ValueError(
-                f"ffmpeg excedeu timeout de {VIDEO_TIMEOUT_SECONDS}s"
-            ) from exc
+        run_ffmpeg(in_path, output_args, timeout=VIDEO_TIMEOUT_SECONDS)
         elapsed = time.monotonic() - started
-
-        if result.returncode != 0:
-            raise ValueError(f"ffmpeg falhou: {ffmpeg_error_message(result.stderr)}")
 
         payload = out_path.read_bytes()
 

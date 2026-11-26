@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import subprocess
 import tempfile
 import time
 from io import BytesIO
@@ -8,9 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from app.workers.processors.base import (
-    FFMPEG_INPUT_OPTIONS,
     ProcessorResult,
-    ffmpeg_error_message,
+    run_ffmpeg,
 )
 
 AUDIO_TIMEOUT_SECONDS = 180
@@ -75,38 +73,21 @@ def extract(
         out_path = Path(tmpdir) / f"output.{fmt}"
         in_path.write_bytes(input_stream.getvalue())
 
-        cmd = [
-            "ffmpeg", "-y",
-            *FFMPEG_INPUT_OPTIONS,
-            "-i", str(in_path),
+        output_args = [
             "-vn",
             "-c:a", codec,
         ]
         if bitrate is not None:
-            cmd += ["-b:a", bitrate]
+            output_args += ["-b:a", bitrate]
         if sample_rate is not None:
-            cmd += ["-ar", str(sample_rate)]
+            output_args += ["-ar", str(sample_rate)]
         if channels is not None:
-            cmd += ["-ac", str(channels)]
-        cmd += [str(out_path)]
+            output_args += ["-ac", str(channels)]
+        output_args += [str(out_path)]
 
         started = time.monotonic()
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=AUDIO_TIMEOUT_SECONDS,
-                check=False,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise ValueError(
-                f"ffmpeg excedeu timeout de {AUDIO_TIMEOUT_SECONDS}s"
-            ) from exc
+        run_ffmpeg(in_path, output_args, timeout=AUDIO_TIMEOUT_SECONDS)
         elapsed = time.monotonic() - started
-
-        if result.returncode != 0:
-            raise ValueError(f"ffmpeg falhou: {ffmpeg_error_message(result.stderr)}")
 
         payload = out_path.read_bytes()
 
