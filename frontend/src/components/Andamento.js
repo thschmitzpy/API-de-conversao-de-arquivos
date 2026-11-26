@@ -23,6 +23,21 @@ function etapaAtual(jobId, job) {
   return 2;
 }
 
+function BarraProgresso({ rotulo, valor }) {
+  return (
+    <div
+      className="progresso"
+      role="progressbar"
+      aria-label={rotulo}
+      aria-valuenow={valor}
+      aria-valuemin={0}
+      aria-valuemax={100}
+    >
+      <div className="progresso__barra" style={{ width: `${valor}%` }} />
+    </div>
+  );
+}
+
 function classeEtapa(indice, atual, falhou, concluido) {
   if (concluido || indice < atual) {
     return 'etapa etapa--feita';
@@ -54,6 +69,7 @@ export default function Andamento({
   const concluido = job?.status === 'DONE';
   const emAndamento = !falha && !concluido;
   const etapa = etapaAtual(jobId, job);
+  const porcentagemConversao = emAndamento && etapa === 2 ? job.progress ?? null : null;
   const duracao = concluido ? formatarDuracao(job.created_at, job.finished_at) : null;
   const expiraEm = concluido ? job.expires_at : null;
   const [prazoVencido, setPrazoVencido] = useState(false);
@@ -114,23 +130,21 @@ export default function Andamento({
 
       {emAndamento && etapa === 0 && (
         <>
-          <div
-            className="progresso"
-            role="progressbar"
-            aria-label="Envio do arquivo"
-            aria-valuenow={progresso}
-            aria-valuemin={0}
-            aria-valuemax={100}
-          >
-            <div className="progresso__barra" style={{ width: `${progresso}%` }} />
-          </div>
+          <BarraProgresso rotulo="Envio do arquivo" valor={progresso} />
           <p className="andamento__status">
             {progresso < 100 ? `Enviando… ${progresso}%` : 'Registrando o job…'}
           </p>
         </>
       )}
 
-      {emAndamento && etapa > 0 && (
+      {porcentagemConversao !== null && (
+        <>
+          <BarraProgresso rotulo="Conversão do arquivo" valor={porcentagemConversao} />
+          <p className="andamento__status">Convertendo… {porcentagemConversao}%</p>
+        </>
+      )}
+
+      {emAndamento && etapa > 0 && porcentagemConversao === null && (
         <p className="andamento__status">
           <span className="spinner" aria-hidden="true" />
           {etapa === 1 ? 'Na fila, aguardando um worker livre…' : 'Convertendo…'}

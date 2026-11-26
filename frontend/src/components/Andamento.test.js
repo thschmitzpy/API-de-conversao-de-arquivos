@@ -96,3 +96,24 @@ test('job restaurado após F5 não oferece voltar ao arquivo', () => {
     expect(screen.queryByRole('button', {name: /tentar de novo/})).not.toBeInTheDocument();
     expect(screen.getByRole('button', {name: 'Converter outro arquivo'})).toBeInTheDocument();
 });
+test('conversão com progresso mostra a barra com a porcentagem', () => {
+    renderizar({job: {status: 'PROCESSING', progress: 42}, erro: null});
+
+    const barra = screen.getByRole('progressbar', {name: 'Conversão do arquivo'});
+    expect(barra).toHaveAttribute('aria-valuenow', '42');
+    expect(screen.getByText('Convertendo… 42%')).toBeInTheDocument();
+});
+
+test('conversão sem progresso mantém o spinner', () => {
+    renderizar({job: {status: 'PROCESSING', progress: null}, erro: null});
+
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    expect(screen.getByText('Convertendo…')).toBeInTheDocument();
+});
+
+test('job na fila não mostra barra de conversão', () => {
+    renderizar({job: {status: 'PENDING', progress: null}, erro: null});
+
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    expect(screen.getByText('Na fila, aguardando um worker livre…')).toBeInTheDocument();
+});
