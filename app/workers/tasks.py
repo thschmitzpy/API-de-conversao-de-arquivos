@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from celery.utils.log import get_task_logger
 from sqlalchemy import and_, or_, select, update
+from sqlalchemy.orm import Session
 
 from app.broker.celery_app import celery_app
 from app.config import get_settings
@@ -36,6 +37,7 @@ from app.workers.processors import (
     video_transcode,
 )
 from app.workers.processors.base import Processor
+from app.workers.progress import ProgressCallback, reporting_progress
 
 logger = get_task_logger(__name__)
 
@@ -62,6 +64,8 @@ MAX_ERROR_MESSAGE_LENGTH = 300
 _ABSOLUTE_PATH = re.compile(r"(?<![\w/])/[\w.-]+(?:/[\w.-]+)+")
 
 PURGE_BATCH_SIZE = 200
+
+PROGRESS_MIN_INTERVAL_SECONDS = 1.0
 
 
 @celery_app.task(name="app.workers.tasks.process_job")
@@ -110,7 +114,8 @@ def process_job(job_id: str) -> None:
                     settings.minio_bucket_input,
                     job.input_key,
                 )
-                result = processor(input_stream, job.parameters)
+                with reporting_progress(_progress_writer(db, job_uuid)):
+                    result = processor(input_stream, job.parameters)
 
                 output_key = f"{job.id}/output.{result.output_extension}"
                 output_size = result.output.getbuffer().nbytes
@@ -125,6 +130,8 @@ def process_job(job_id: str) -> None:
                 job.output_key = output_key
                 job.output_content_type = result.output_content_type
                 job.result_metadata = result.result_metadata
+                if job.progress is not None:
+                    job.progress = 100
                 job.status = JobStatus.DONE
                 job.finished_at = datetime.now(timezone.utc)
                 db.commit()
@@ -232,6 +239,36 @@ def purge_expired_files() -> int:
             )
 
     return purged
+
+
+def _progress_writer(db: Session, job_uuid: uuid.UUID) -> ProgressCallback:
+    last_percent = -1
+    last_write = 0.0
+
+    def write(fraction: float) -> None:
+        nonlocal last_percent, last_write
+        percent = int(fraction * 100)
+        now = time.monotonic()
+        if percent <= last_percent or now - last_write < PROGRESS_MIN_INTERVAL_SECONDS:
+            return
+        try:
+            db.execute(
+                update(Job)
+                .where(Job.id == job_uuid, Job.status == JobStatus.PROCESSING)
+                .values(progress=percent)
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.warning(
+                "Falha ao gravar progresso",
+                extra={"job_id": str(job_uuid)},
+                exc_info=True,
+            )
+            return
+        last_percent, last_write = percent, now
+
+    return write
 
 
 def _public_error_message(exc: Exception) -> str:

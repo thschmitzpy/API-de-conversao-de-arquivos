@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Enum, Integer, String, Text, func
+from sqlalchemy import DateTime, Enum, Integer, SmallInteger, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -37,6 +37,7 @@ class Job(Base):
         index=True,
     )
     operation: Mapped[str] = mapped_column(String(64), nullable=False)
+    progress: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
 
     input_key: Mapped[str] = mapped_column(String(512), nullable=False)
     input_filename: Mapped[str] = mapped_column(String(255), nullable=False)

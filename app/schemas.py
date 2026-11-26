@@ -16,6 +16,7 @@ _JOB_STATUS_EXAMPLE: dict[str, Any] = {
     "id": _JOB_ID_EXAMPLE,
     "status": "DONE",
     "operation": "image.thumbnail",
+    "progress": None,
     "input_filename": "foto.jpg",
     "input_content_type": "image/jpeg",
     "input_size_bytes": 482133,
@@ -77,6 +78,13 @@ class JobStatusResponse(BaseModel):
     id: uuid.UUID
     status: JobStatus = Field(description=_STATUS_DESCRIPTION)
     operation: str
+    progress: int | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="Porcentagem do processamento. Informada por video.transcode e "
+                    "audio.extract; nula nas demais operacoes e enquanto o job esta na fila.",
+    )
 
     input_filename: str
     input_content_type: str
