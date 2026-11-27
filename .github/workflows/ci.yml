@@ -218,3 +218,60 @@ jobs:
             -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
             -e DOMAIN=localhost -e BASIC_AUTH_USER=ci -e BASIC_AUTH_HASH="$hash" \
             caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare .env
+        run: cp .env.example .env
+
+      # Sem beat, Prometheus e Grafana: o fluxo da tela nao depende deles.
+      - name: Start stack
+        run: docker compose up -d --build api worker frontend
+
+      # 404 de um job inexistente prova a cadeia inteira: nginx, chave injetada, API e banco.
+      - name: Wait for the API behind the frontend proxy
+        run: |
+          for _ in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/api/jobs/00000000-0000-0000-0000-000000000000)
+            if [ "$code" = "404" ]; then exit 0; fi
+            sleep 3
+          done
+          echo "::error::API nao respondeu pelo proxy do frontend (ultimo status: $code)"
+          exit 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Install dependencies
+        working-directory: e2e
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Chromium
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright
+        working-directory: e2e
+        run: npx playwright test
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: e2e/playwright-report/
+          retention-days: 14
+
+      - name: Dump compose logs on failure
+        if: failure()
+        run: docker compose logs --no-color api worker frontend
+
+      - name: Stop services
+        if: always()
+        run: docker compose down -v

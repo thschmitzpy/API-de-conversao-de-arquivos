@@ -373,17 +373,29 @@ npm ci
 npm test
 ```
 
+Ponta a ponta (Playwright), com o compose de pé:
+
+```bash
+cd e2e
+npm ci
+npx playwright install chromium
+npx playwright test
+```
+
+Os 5 testes usam a tela em :8081 como uma pessoa usaria, num Chromium de verdade: convertem uma imagem e conferem o arquivo baixado, acompanham a barra de progresso de um vídeo até o WebM, recarregam a página no meio da conversão, enviam um arquivo corrompido e confirmam que o nginx bloqueia a listagem de jobs. O vídeo de teste é gerado pelo FFmpeg do próprio worker, então a máquina não precisa dele. Com `--headed` o navegador aparece; com `--ui`, cada passo fica navegável com print da tela.
+
 ---
 
 ## Integração contínua
 
-O workflow `.github/workflows/ci.yml` roda a cada push e pull request na branch `main`, com cinco jobs:
+O workflow `.github/workflows/ci.yml` roda a cada push e pull request na branch `main`, com seis jobs:
 
 - **`lint`** — confere se o `poetry.lock` está em dia com o `pyproject.toml` (`poetry check --lock`) e roda o Ruff sobre todo o código.
 - **`test`** — sobe Postgres, Redis e MinIO via `docker compose`, instala Python 3.13 + Poetry e os binários de sistema dos processors (FFmpeg, Tesseract com `eng`/`por` e LibreOffice headless) no runner, aplica migrations Alembic, inicia o worker Celery em background e executa toda a suite `pytest` com cobertura (pytest-cov). A tabela de cobertura vai para o resumo do run, o relatório HTML fica como artefato `coverage-html`, e o job reprova se a cobertura ficar abaixo de 90%.
 - **`k8s`** — renderiza os manifests com `kubectl kustomize k8s` e valida o resultado com [kubeconform](https://github.com/yannh/kubeconform) em modo `-strict` (campo desconhecido ou com tipo errado reprova o build). Antes disso, compara os arquivos do Grafana em `monitoring/` com as cópias em `k8s/monitoring/`.
 - **`frontend`** — roda os testes com Jest e cobertura (piso de 90% das linhas; relatório HTML no artefato `frontend-coverage-html`), builda a imagem de produção com o lint como erro (`CI=true`) e valida a config do nginx com `nginx -t`.
 - **`deploy`** — valida o `docker-compose.prod.yml` com `docker compose config -q`, usando o `.env.prod.example` como `.env.prod`, e o `deploy/Caddyfile` com `caddy validate`, usando um hash gerado na hora. Uma variável obrigatória esquecida no exemplo ou um erro de sintaxe no Caddyfile reprovam o push, em vez de aparecer só no deploy.
+- **`e2e`** — sobe API, worker e frontend com `docker compose up --build`, espera a API responder através do nginx e roda os testes Playwright num Chromium headless. O relatório HTML, com vídeo e trace dos testes que falharem, fica no artefato `playwright-report`; em caso de falha, o job também despeja os logs dos containers.
 
 As cópias existem porque o Kustomize não lê arquivos fora do diretório da kustomization. Sem a verificação, mexer no dashboard do compose e esquecer da cópia faria os dois ambientes divergirem sem nenhum erro aparente.
 
@@ -414,6 +426,7 @@ app/
 ├── rate_limit.py     Limiter slowapi
 └── schemas.py        Pydantic DTOs
 deploy/               Caddyfile do compose de produção (docker-compose.prod.yml)
+e2e/                  Testes de ponta a ponta (Playwright) contra a stack do compose
 frontend/             React (CRA) + nginx com proxy para a API
 k8s/                  Manifests Kustomize (frontend, api, worker, beat, postgres, redis, minio, prometheus, grafana)
 ├── monitoring/       Configs do Prometheus/Grafana para o cluster
@@ -459,6 +472,7 @@ tests/
 - **Containers sem root** — API, worker e beat rodam com o UID 10001, e o frontend usa a variante `nginx-unprivileged` (UID 101, porta 8080). O código em `/code` continua do root, então o processo não consegue alterá-lo. No Kubernetes, `runAsNonRoot`, `allowPrivilegeEscalation: false` e `drop: ["ALL"]` fazem o cluster recusar o pod se a imagem voltar a rodar como root.
 - **`poetry.lock` versionado** — as imagens da API e do worker e o CI instalam exatamente as mesmas versões. Sem o lock, cada build resolvia os `^` do `pyproject.toml` na hora, e duas imagens buildadas em dias diferentes podiam divergir sem nenhuma mudança no código. O `COPY` dos Dockerfiles exige o arquivo, e o job `lint` reprova o push se o `pyproject.toml` mudar sem o lock acompanhar. Atualizar dependência vira um diff revisável.
 - **Cobertura com piso medido, não chutado** — o CI é o único lugar onde a suíte inteira roda num processo só, com todos os binários dos processors, então o número de referência vem de lá (92% com branch coverage, que conta os dois lados de cada `if`). O piso de 90% deixa folga para refactors e reprova código novo sem teste. O código executado pelo worker Celery em background não entra na medição, mas processors e tasks também são chamados direto pelos testes.
+- **Poucos testes de ponta a ponta, nos caminhos que importam** — os testes unitários e de integração verificam cada peça isolada, mas nenhum percorre navegador → nginx → API → fila → worker → MinIO → download. Um campo renomeado na API com o teste do front ainda usando o nome antigo, uma regra do nginx bloqueando uma rota da tela ou um build do React quebrado só dentro da imagem passariam por todos eles. Os testes E2E ficam numa pasta própria (`e2e/`), para o Playwright e os browsers não entrarem nas dependências do front, e são só 5: E2E é lento e depende da stack inteira, então cobre o fluxo principal e deixa os detalhes para os testes rápidos.
 - **Caddy na frente do compose de produção** — numa VM única, o Caddy resolve HTTPS (emissão e renovação automáticas) e basic auth com uma config de 25 linhas, sem certbot nem cron. O nginx do front continua responsável pela allowlist de rotas e pela chave da API, e passa a confiar no `X-Forwarded-For` só da rede interna do compose (`TRUSTED_PROXY_CIDR`). O HSTS ficou de fora de propósito: testando com `DOMAIN=localhost`, o navegador gravaria a regra para `localhost` e passaria a forçar HTTPS também no `localhost:8081` do ambiente de dev.
 
 ---
