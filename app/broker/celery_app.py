@@ -2,11 +2,12 @@ import os
 import shutil
 
 from celery import Celery
-from celery.signals import setup_logging, worker_init, worker_ready
+from celery.signals import setup_logging, worker_init, worker_process_init, worker_ready
 from prometheus_client import CollectorRegistry, multiprocess, start_http_server
 
 from app.config import get_settings
 from app.logging_setup import configure_logging
+from app.tracing import configure_tracing
 
 settings = get_settings()
 
@@ -46,6 +47,11 @@ celery_app.conf.update(
 @setup_logging.connect
 def _configure_logging(**_: object) -> None:
     configure_logging()
+
+
+@worker_process_init.connect
+def _configure_tracing(**_: object) -> None:
+    configure_tracing("conversor-worker")
 
 
 @worker_init.connect

@@ -12,7 +12,7 @@ uvicorn = { extras = ["standard"], version = "^0.32.0" }
 python-multipart = "^0.0.12"
 pydantic = "^2.9.0"
 pydantic-settings = "^2.6.0"
-sqlalchemy = "^2.0.35"
+sqlalchemy = { extras = ["asyncio"], version = "^2.0.35" }
 psycopg = { extras = ["binary"], version = "^3.2.3" }
 alembic = "^1.13.3"
 celery = { extras = ["redis"], version = "^5.4.0" }
@@ -34,6 +34,12 @@ slowapi = "^0.1.9"
 prometheus-client = "^0.21.0"
 prometheus-fastapi-instrumentator = "^7.0.0"
 python-json-logger = "^2.0.7"
+opentelemetry-sdk = "^1.45.2"
+opentelemetry-exporter-otlp-proto-http = "^1.45.2"
+opentelemetry-instrumentation-fastapi = "^0.66b2"
+opentelemetry-instrumentation-celery = "^0.66b2"
+opentelemetry-instrumentation-sqlalchemy = "^0.66b2"
+opentelemetry-instrumentation-httpx = "^0.66b2"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.3"

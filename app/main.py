@@ -14,6 +14,7 @@ from app.forwarded_prefix import ForwardedPrefixMiddleware
 from app.logging_setup import configure_logging
 from app.rate_limit import limiter
 from app.storage.minio_client import ensure_buckets
+from app.tracing import configure_tracing
 from app.webhook.openapi import register_webhook_docs
 
 configure_logging()
@@ -102,6 +103,8 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(ForwardedPrefixMiddleware)
+
+configure_tracing("conversor-api", app=app)
 
 Instrumentator(
     excluded_handlers=["/metrics", "/health", "/ready"],
