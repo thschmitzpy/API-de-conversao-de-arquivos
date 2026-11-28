@@ -7,8 +7,11 @@ from functools import lru_cache
 from typing import BinaryIO
 
 from minio import Minio
+from opentelemetry import trace
 
 from app.config import get_settings
+
+tracer = trace.get_tracer(__name__)
 
 
 @lru_cache
@@ -50,22 +53,30 @@ def upload_stream(
         size: int,
         content_type: str,
 ) -> None:
-    get_client().put_object(
-        bucket_name=bucket,
-        object_name=key,
-        data=stream,
-        length=size,
-        content_type=content_type,
-    )
+    with tracer.start_as_current_span(
+        "storage.upload",
+        attributes={"storage.bucket": bucket, "storage.size_bytes": size},
+    ):
+        get_client().put_object(
+            bucket_name=bucket,
+            object_name=key,
+            data=stream,
+            length=size,
+            content_type=content_type,
+        )
 
 
 def download_bytes(bucket: str, key: str) -> io.BytesIO:
-    response = get_client().get_object(bucket, key)
-    try:
-        buffer = io.BytesIO(response.read())
-    finally:
-        response.close()
-        response.release_conn()
+    with tracer.start_as_current_span(
+        "storage.download", attributes={"storage.bucket": bucket}
+    ) as span:
+        response = get_client().get_object(bucket, key)
+        try:
+            buffer = io.BytesIO(response.read())
+        finally:
+            response.close()
+            response.release_conn()
+        span.set_attribute("storage.size_bytes", buffer.getbuffer().nbytes)
     buffer.seek(0)
     return buffer
 

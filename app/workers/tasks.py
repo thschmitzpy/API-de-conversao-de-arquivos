@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from celery.utils.log import get_task_logger
+from opentelemetry import trace
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.orm import Session
 
@@ -22,6 +23,7 @@ from app.storage.minio_client import (
     presigned_get_url,
     upload_stream,
 )
+from app.tracing import tag_job
 from app.webhook import notifier
 from app.webhook.url_guard import UnsafeCallbackUrl, validate_callback_url
 from app.workers.processors import (
@@ -40,6 +42,7 @@ from app.workers.processors.base import Processor
 from app.workers.progress import ProgressCallback, reporting_progress
 
 logger = get_task_logger(__name__)
+tracer = trace.get_tracer(__name__)
 
 _PROCESSORS: dict[str, Processor] = {
     Operation.IMAGE_THUMBNAIL: image.thumbnail,
@@ -80,6 +83,7 @@ def process_job(job_id: str) -> None:
             return
 
         operation = job.operation
+        tag_job(job_id, operation)
         processor = _PROCESSORS.get(operation)
         if processor is None:
             job.status = JobStatus.FAILED
@@ -114,7 +118,10 @@ def process_job(job_id: str) -> None:
                     settings.minio_bucket_input,
                     job.input_key,
                 )
-                with reporting_progress(_progress_writer(db, job_uuid)):
+                with (
+                    tracer.start_as_current_span(f"processor {operation}"),
+                    reporting_progress(_progress_writer(db, job_uuid)),
+                ):
                     result = processor(input_stream, job.parameters)
 
                 output_key = f"{job.id}/output.{result.output_extension}"
@@ -298,6 +305,7 @@ def deliver_webhook(self, job_id: str) -> None:
         job = db.get(Job, uuid.UUID(job_id))
         if job is None or not job.callback_url or job.callback_delivered_at:
             return
+        tag_job(job_id, job.operation)
 
         try:
             validate_callback_url(

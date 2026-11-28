@@ -47,3 +47,9 @@ def configure_tracing(service_name: str, app: FastAPI | None = None) -> bool:
 
     logger.info("Tracing ativo", extra={"service_name": service_name, "otlp_endpoint": endpoint})
     return True
+
+def tag_job(job_id: str, operation: str | None = None) -> None:
+      span = trace.get_current_span()
+      span.set_attribute("conversor.job_id", job_id)
+      if operation is not None:
+          span.set_attribute("conversor.operation", operation)

@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import FastAPI
 from opentelemetry.sdk.resources import SERVICE_NAME
+from opentelemetry.sdk.trace import TracerProvider
 
 from app import tracing
 
@@ -77,3 +78,17 @@ def test_com_app_instrumenta_fastapi_sem_probes(monkeypatch, chamadas):
 @pytest.mark.parametrize("endpoint", ["http://jaeger:4318", "http://jaeger:4318/"])
 def test_traces_url(endpoint):
     assert tracing.traces_url(endpoint) == "http://jaeger:4318/v1/traces"
+
+
+def test_tag_job_marca_span_atual():
+    tracer = TracerProvider().get_tracer("teste")
+
+    with tracer.start_as_current_span("requisicao") as span:
+        tracing.tag_job("abc-123", "image.thumbnail")
+
+    assert span.attributes["conversor.job_id"] == "abc-123"
+    assert span.attributes["conversor.operation"] == "image.thumbnail"
+
+
+def test_tag_job_sem_span_ativo_nao_falha():
+    tracing.tag_job("abc-123")

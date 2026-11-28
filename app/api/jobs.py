@@ -44,6 +44,7 @@ from app.storage.minio_client import (
     presigned_get_url,
     upload_stream,
 )
+from app.tracing import tag_job
 from app.webhook.url_guard import UnsafeCallbackUrl, validate_callback_url
 
 
@@ -187,6 +188,7 @@ def create_job(
             raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
     job_id = uuid.uuid4()
+    tag_job(str(job_id), operation.value)
     input_key = f"{job_id}/{filename}"
     content_type = _safe_content_type(file.content_type)
 
