@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
+from opentelemetry import trace
 from pythonjsonlogger import jsonlogger
 
 
@@ -22,6 +23,11 @@ class ConversorJsonFormatter(jsonlogger.JsonFormatter):
 
         if log_record.get("taskName") is None:
             log_record.pop("taskName", None)
+
+        span_context = trace.get_current_span().get_span_context()
+        if span_context.is_valid:
+            log_record["trace_id"] = trace.format_trace_id(span_context.trace_id)
+            log_record["span_id"] = trace.format_span_id(span_context.span_id)
 
 
 def configure_logging(level: int = logging.INFO) -> None:

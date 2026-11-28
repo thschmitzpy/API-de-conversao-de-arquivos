@@ -6,6 +6,7 @@ import logging
 from datetime import datetime
 
 import pytest
+from opentelemetry.sdk.trace import TracerProvider
 
 from app.logging_setup import configure_logging
 
@@ -81,3 +82,25 @@ def test_uvicorn_access_usa_mesmo_formatter(capture_json):
     assert len(records) == 1
     assert records[0]["logger"] == "uvicorn.access"
     assert records[0]["message"] == "GET /health 200"
+
+
+def test_sem_span_ativo_nao_tem_trace_id(capture_json):
+    logging.getLogger("teste").info("fora de trace")
+
+    rec = _parse(capture_json)[0]
+
+    assert "trace_id" not in rec
+    assert "span_id" not in rec
+
+
+def test_span_ativo_injeta_trace_id_e_span_id(capture_json):
+    tracer = TracerProvider().get_tracer("teste")
+
+    with tracer.start_as_current_span("operacao") as span:
+        logging.getLogger("teste").info("dentro do trace")
+        contexto = span.get_span_context()
+
+    rec = _parse(capture_json)[0]
+
+    assert rec["trace_id"] == format(contexto.trace_id, "032x")
+    assert rec["span_id"] == format(contexto.span_id, "016x")
